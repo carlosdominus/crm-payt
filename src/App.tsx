@@ -148,6 +148,7 @@ export default function App() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
+  const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard'>('crm');
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
@@ -384,12 +385,35 @@ export default function App() {
     if (!user) return;
     try {
       const docRef = doc(db, `users/${user.uid}/clientData`, clientKey);
-      await setDoc(docRef, {
+      const currentData = clientExtraData[clientKey] || {};
+      const newData = {
         clientKey,
-        ...(clientExtraData[clientKey] || {}),
+        ...currentData,
         ...updates,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      };
+      
+      await setDoc(docRef, newData, { merge: true });
+
+      // Sync with Google Sheets if URL is configured
+      if (sheetSyncUrl) {
+        const client = clients.find(c => c.key === clientKey);
+        const rowNumber = client?.leads?.[0]?.rowNumber;
+        
+        if (rowNumber) {
+          fetch(sheetSyncUrl, {
+            method: 'POST',
+            mode: 'no-cors', // Google Apps Script requires this for cross-origin without complex headers
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rowNumber,
+              trackingCode: updates.trackingCode !== undefined ? updates.trackingCode : currentData.trackingCode,
+              assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : currentData.assignedWhatsappId,
+              assignedWhatsappName: updates.assignedWhatsappId ? whatsappAccounts.find(a => a.id === updates.assignedWhatsappId)?.name : (updates.assignedWhatsappId === "" ? "" : undefined)
+            })
+          }).catch(err => console.error("Sync error:", err));
+        }
+      }
     } catch (error) {
       // @ts-ignore
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/clientData/${clientKey}`);
@@ -2058,15 +2082,28 @@ export default function App() {
                   </ol>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL do Webhook (Apps Script)</label>
-                  <input 
-                    type="text" 
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
-                  />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL do Webhook (Receber Leads)</label>
+                    <input 
+                      type="text" 
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      placeholder="URL para receber dados da planilha"
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL de Sincronização (Atualizar Planilha)</label>
+                    <input 
+                      type="text" 
+                      value={sheetSyncUrl}
+                      onChange={(e) => setSheetSyncUrl(e.target.value)}
+                      placeholder="URL do Web App para salvar dados de volta"
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    />
+                  </div>
                 </div>
 
                 <div className="pt-4 border-t border-modern-border">
@@ -2105,6 +2142,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     localStorage.setItem('crm_webhook_url', webhookUrl);
+                    localStorage.setItem('crm_sheet_sync_url', sheetSyncUrl);
                     setShowSettings(false);
                   }}
                   className="w-full bg-modern-primary text-white py-3 font-bold text-sm hover:bg-modern-primary/90 transition-all flex items-center justify-center gap-2"
