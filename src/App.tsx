@@ -1268,10 +1268,10 @@ export default function App() {
                             </div>
                             <div className={cn(
                               "px-2 py-0.5 rounded-none text-[9px] font-black uppercase shadow-sm flex items-center justify-center",
-                              !currentTag ? "bg-blue-600 text-white" :
-                              currentTag === 'pendente' ? "bg-orange-500 text-white" : 
-                              currentTag === 'vendido' ? "bg-emerald-500 text-white" :
-                              "bg-rose-600 text-white"
+                              !currentTag ? "bg-[#DBEAFE] text-blue-700" :
+                              currentTag === 'pendente' ? "bg-[#FEF3C6] text-amber-700" : 
+                              currentTag === 'vendido' ? "bg-[#D0FBE5] text-emerald-700" :
+                              "bg-[#FFE3E6] text-rose-700"
                             )}>
                               {!currentTag ? 'Enviar Msg' : 
                                currentTag === 'pendente' ? 'Pendente' : 

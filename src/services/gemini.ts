@@ -1,7 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 import { Lead } from "../types";
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let genAI: GoogleGenAI | null = null;
+
+function getGenAI() {
+  if (!genAI) {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("VITE_GEMINI_API_KEY environment variable is required");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 export async function generatePersonalizedMessage(lead: Lead) {
   const model = "gemini-3-flash-preview";
@@ -33,11 +44,10 @@ export async function generatePersonalizedMessage(lead: Lead) {
   `;
 
   try {
-    const response = await genAI.models.generateContent({
-      model,
-      contents: prompt,
-    });
-    return response.text || "Não foi possível gerar a mensagem.";
+    const ai = getGenAI();
+    const result = await ai.getGenerativeModel({ model }).generateContent(prompt);
+    const response = await result.response;
+    return response.text() || "Não foi possível gerar a mensagem.";
   } catch (error) {
     console.error("Erro ao gerar mensagem:", error);
     return "Erro ao conectar com a IA para gerar a mensagem.";

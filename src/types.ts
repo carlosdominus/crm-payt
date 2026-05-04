@@ -59,11 +59,11 @@ export const FUNNEL_STEPS = [
 ];
 
 export const STATUS_THEMES: Record<string, { bg: string; text: string }> = {
-  "Aprovado": { bg: "bg-emerald-500", text: "text-white" },
-  "Pendente": { bg: "bg-orange-500", text: "text-white" },
-  "Cancelado": { bg: "bg-rose-600", text: "text-white" },
+  "Aprovado": { bg: "bg-[#00BC7D]", text: "text-white" },
+  "Pendente": { bg: "bg-[#FE9900]", text: "text-white" },
+  "Cancelado": { bg: "bg-[#EC1A40]", text: "text-white" },
   "Reembolsado": { bg: "bg-blue-500", text: "text-white" },
-  "Carrinho Abandonado": { bg: "bg-slate-400", text: "text-white" },
-  "Expirado": { bg: "bg-gray-600", text: "text-white" },
+  "Carrinho Abandonado": { bg: "bg-[#8FA1B9]", text: "text-white" },
+  "Expirado": { bg: "bg-[#F44900]", text: "text-white" },
   "Lixo": { bg: "bg-rose-100", text: "text-rose-600" },
 };
