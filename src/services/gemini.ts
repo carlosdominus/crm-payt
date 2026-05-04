@@ -5,17 +5,19 @@ let genAI: GoogleGenAI | null = null;
 
 function getGenAI() {
   if (!genAI) {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const meta = import.meta as any;
+    const apiKey = meta.env?.VITE_GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error("VITE_GEMINI_API_KEY environment variable is required");
     }
-    genAI = new GoogleGenAI({ apiKey });
+    // @ts-ignore - version compatibility
+    genAI = new GoogleGenAI(apiKey);
   }
   return genAI;
 }
 
 export async function generatePersonalizedMessage(lead: Lead) {
-  const model = "gemini-3-flash-preview";
+  const modelName = "gemini-3-flash-preview";
   
   const prompt = `
     Você é um especialista em vendas e customer success do produto "Protocolo Força Natural".
@@ -45,7 +47,9 @@ export async function generatePersonalizedMessage(lead: Lead) {
 
   try {
     const ai = getGenAI();
-    const result = await ai.getGenerativeModel({ model }).generateContent(prompt);
+    // @ts-ignore - version compatibility
+    const model = ai.getGenerativeModel({ model: modelName });
+    const result = await model.generateContent(prompt);
     const response = await result.response;
     return response.text() || "Não foi possível gerar a mensagem.";
   } catch (error) {

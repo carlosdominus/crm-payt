@@ -13,6 +13,7 @@ export interface Lead {
   numericValue: number;
   paymentMethod?: string;
   rowNumber?: number;
+  checkoutUrl?: string; // Column V
   // UTM Fields
   src?: string;
   sck?: string;
@@ -24,6 +25,15 @@ export interface Lead {
   ttcid?: string;
   adId?: string;
   tags?: string;
+}
+
+export interface WhatsAppAccount {
+  id: string;
+  name: string;
+  origin: string;
+  color: string;
+  phoneNumber: string;
+  identifier: string; // The "numero de identificação ID" requested
 }
 
 export interface ManualSale {
@@ -48,6 +58,8 @@ export interface Client {
   status: string; // Overall status (e.g., most recent)
   tag?: 'pendente' | 'vendido' | 'lixo' | null;
   manualSales?: ManualSale[];
+  trackingCode?: string;
+  assignedWhatsappId?: string;
 }
 
 export const FUNNEL_STEPS = [

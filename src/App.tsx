@@ -49,7 +49,7 @@ import {
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -149,6 +149,16 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard'>('crm');
+  const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
+  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
+  const [showWhatsappManager, setShowWhatsappManager] = useState(false);
+  const [whatsappForm, setWhatsappForm] = useState({
+    name: "",
+    origin: "",
+    color: "#25D366",
+    phoneNumber: "",
+    identifier: ""
+  });
 
   const getClientTag = (client: Client) => {
     // 1. Manual tag from Firestore (highest priority)
@@ -294,6 +304,98 @@ export default function App() {
   // with native scrollbars.
   
   // Tagging state
+  useEffect(() => {
+    if (!authReady || !user) {
+      setClientExtraData({});
+      return;
+    }
+
+    const unsubscribe = onSnapshot(collection(db, `users/${user.uid}/clientData`), (snapshot) => {
+      const data: Record<string, any> = {};
+      snapshot.docs.forEach(doc => {
+        data[doc.id] = doc.data();
+      });
+      setClientExtraData(data);
+    }, (error) => {
+      // @ts-ignore
+      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/clientData`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, user]);
+
+  useEffect(() => {
+    if (!authReady || !user) {
+      setWhatsappAccounts([]);
+      return;
+    }
+
+    const q = query(collection(db, `users/${user.uid}/whatsappAccounts`), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const accounts = snapshot.docs.map(doc => doc.data() as WhatsAppAccount);
+      setWhatsappAccounts(accounts);
+    }, (error) => {
+      // @ts-ignore
+      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/whatsappAccounts`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, user]);
+
+  const saveWhatsappAccount = async () => {
+    if (!user || !whatsappForm.name || !whatsappForm.identifier) return;
+
+    const id = (whatsappForm as any).id || Math.random().toString(36).substr(2, 9);
+    const newAcc: WhatsAppAccount = {
+      ...whatsappForm,
+      id
+    } as WhatsAppAccount;
+
+    try {
+      await setDoc(doc(db, `users/${user.uid}/whatsappAccounts`, id), {
+        ...newAcc,
+        createdAt: new Date().toISOString()
+      });
+      setWhatsappForm({
+        name: "",
+        origin: "",
+        color: "#25D366",
+        phoneNumber: "",
+        identifier: ""
+      });
+      setShowWhatsappManager(false);
+    } catch (error) {
+      // @ts-ignore
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/whatsappAccounts/${id}`);
+    }
+  };
+
+  const deleteWhatsappAccount = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/whatsappAccounts`, id));
+    } catch (error) {
+      // @ts-ignore
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/whatsappAccounts/${id}`);
+    }
+  };
+
+  const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string }) => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, `users/${user.uid}/clientData`, clientKey);
+      await setDoc(docRef, {
+        clientKey,
+        ...(clientExtraData[clientKey] || {}),
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      // @ts-ignore
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/clientData/${clientKey}`);
+    }
+  };
+
   const [clientTags, setClientTags] = useState<Record<string, 'pendente' | 'vendido' | 'lixo' | null>>({});
 
   useEffect(() => {
@@ -518,6 +620,11 @@ export default function App() {
         skipEmptyLines: true,
         transformHeader: (header) => header.trim().toLowerCase(),
         complete: (results) => {
+          // If PapaParse header: true is used, we can still get the record as an array-like if we need indices
+          // However, results.data is already mapped. Let's get the headers in order.
+          const headers = results.meta.fields || [];
+          const vHeader = headers[21]; // Column V
+
           const rawLeads: Lead[] = results.data.map((row: any, index: number) => {
             const dateStr = row['data'] || '';
             const timeStr = row['hora'] || '';
@@ -574,6 +681,7 @@ export default function App() {
             }
 
             const paymentMethodStr = row['tipo de pagamento'] || '';
+            const checkoutUrlFromV = vHeader ? (row[vHeader] || '').toString().trim() : '';
 
             return {
               id: row['id'] || Math.random().toString(36).substr(2, 9),
@@ -584,6 +692,7 @@ export default function App() {
               valor: isNaN(leadValue) ? 'R$ 0,00' : `R$ ${leadValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
               status: normalizedStatus,
               codPay: (row['cod pay'] || '').trim(),
+              checkoutUrl: checkoutUrlFromV || (row['checkout_link'] || row['checkout'] || '').trim(),
               data: dateStr,
               hora: timeStr,
               timestamp,
@@ -746,7 +855,9 @@ export default function App() {
         ...client,
         totalSpent,
         status,
-        manualSales: clientManualSales
+        manualSales: clientManualSales,
+        trackingCode: clientExtraData[client.key]?.trackingCode,
+        assignedWhatsappId: clientExtraData[client.key]?.assignedWhatsappId
       };
     });
   }, [clients, manualSales]);
@@ -952,6 +1063,13 @@ export default function App() {
                 <Settings size={18} />
               </button>
               <button 
+                onClick={() => setShowWhatsappManager(true)}
+                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-emerald-600 transition-all shadow-sm"
+                title="Gerenciar WhatsApps"
+              >
+                <Phone size={18} />
+              </button>
+              <button 
                 onClick={fetchData}
                 disabled={refreshing}
                 className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm"
@@ -1125,6 +1243,7 @@ export default function App() {
                   <tr className="bg-[#f8f9fa]">
                     <th className="sticky top-0 z-20 px-2 py-2 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
+                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-12">Zap</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
@@ -1205,6 +1324,78 @@ export default function App() {
                             >
                               <Trash2 size={12} />
                             </button>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 border-b border-r border-[#dadce0] overflow-visible">
+                          <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="relative group/zap">
+                              <button 
+                                className={cn(
+                                  "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
+                                  client.assignedWhatsappId 
+                                    ? "text-white" 
+                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
+                                )}
+                                style={client.assignedWhatsappId ? { backgroundColor: whatsappAccounts.find(a => a.id === client.assignedWhatsappId)?.color } : {}}
+                              >
+                                {client.assignedWhatsappId ? (
+                                  <span className="text-[11px] font-black">{whatsappAccounts.find(a => a.id === client.assignedWhatsappId)?.identifier}</span>
+                                ) : (
+                                  <Phone size={14} />
+                                )}
+                              </button>
+                              
+                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-56 bg-white border border-modern-border shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[100] rounded-none">
+                                <div className="p-2.5 border-b border-modern-border bg-slate-50 flex items-center justify-between">
+                                  <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest">Atribuir WhatsApp</p>
+                                  <Phone size={10} className="text-modern-secondary" />
+                                </div>
+                                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                  {client.assignedWhatsappId && (
+                                    <button 
+                                      onClick={() => updateClientExtra(client.key, { assignedWhatsappId: "" })}
+                                      className="w-full text-left px-3 py-3 text-[10px] font-bold hover:bg-rose-50 flex items-center gap-2 border-b border-modern-border/30 text-rose-600 uppercase tracking-tighter transition-colors"
+                                    >
+                                      <div className="w-5 h-5 flex items-center justify-center bg-rose-100 text-rose-600">
+                                        <X size={12} />
+                                      </div>
+                                      Remover Atribuição
+                                    </button>
+                                  )}
+                                  {whatsappAccounts.map(acc => (
+                                    <button 
+                                      key={acc.id}
+                                      onClick={() => updateClientExtra(client.key, { assignedWhatsappId: acc.id })}
+                                      className={cn(
+                                        "w-full text-left px-3 py-3 text-[11px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
+                                        client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
+                                      )}
+                                    >
+                                      <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm" style={{ backgroundColor: acc.color }}>
+                                        {acc.identifier}
+                                      </div>
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="truncate text-modern-text leading-none mb-1">{acc.name}</span>
+                                        <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-60">{acc.origin}</span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                  {whatsappAccounts.length === 0 && (
+                                    <div className="px-4 py-8 text-[10px] text-modern-secondary text-center italic font-bold bg-slate-50/50 uppercase tracking-widest">
+                                      Nenhum Zap cadastrado.
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="p-2 border-t border-modern-border bg-slate-50">
+                                  <button 
+                                    onClick={() => setShowWhatsappManager(true)}
+                                    className="w-full py-2 text-[9px] font-black uppercase text-modern-primary hover:text-modern-text transition-colors text-center"
+                                  >
+                                    Configurar Contas
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </td>
                         <td className="px-3 py-2 border-b border-r border-[#dadce0]">
@@ -1617,9 +1808,47 @@ export default function App() {
 
                 <div className="mb-12">
                   <h2 className="text-4xl font-extrabold tracking-tight text-modern-text mb-3 leading-tight">{currentSelectedClient.nome}</h2>
-                  <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary">
+                  <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary mb-6">
                     <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Mail size={14} /> {currentSelectedClient.email}</p>
                     <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Phone size={14} /> {currentSelectedClient.telefone}</p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {/* Checkout Link */}
+                    {currentSelectedClient.leads?.[0]?.checkoutUrl && (
+                      <div className="flex items-center gap-3 bg-[#DBEAFE]/30 p-4 border border-blue-100">
+                        <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white shrink-0">
+                          <ExternalLink size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-black uppercase text-blue-600 tracking-tighter">Checkout da Venda</p>
+                          <p className="text-xs font-bold text-modern-text truncate">{currentSelectedClient.leads[0].checkoutUrl}</p>
+                        </div>
+                        <button 
+                          onClick={() => copyToClipboard(currentSelectedClient.leads![0].checkoutUrl!)}
+                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 text-[10px] font-black uppercase hover:bg-blue-50 transition-all shadow-sm flex items-center gap-1"
+                        >
+                          <Copy size={12} /> Copiar
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Tracking Code */}
+                    <div className="flex items-center gap-3 bg-slate-50 p-4 border border-modern-border">
+                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0">
+                        <Package size={16} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[10px] font-black uppercase text-modern-secondary tracking-tighter">Código de Rastreio</p>
+                        <input 
+                          type="text"
+                          placeholder="Digite o código de rastreio..."
+                          value={currentSelectedClient.trackingCode || ""}
+                          onChange={(e) => updateClientExtra(currentSelectedClient.key, { trackingCode: e.target.value })}
+                          className="w-full bg-transparent border-b border-modern-text/20 focus:border-modern-text focus:outline-none text-xs font-bold py-1 placeholder:text-modern-secondary/30"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1977,6 +2206,147 @@ export default function App() {
                   >
                     <CheckCircle2 size={18} /> Confirmar Venda
                   </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      {/* WhatsApp Manager Modal */}
+      <AnimatePresence>
+        {showWhatsappManager && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowWhatsappManager(false)}
+              className="fixed inset-0 z-[100] bg-modern-text/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-white shadow-2xl z-[101] overflow-hidden flex flex-col"
+            >
+              <div className="p-8 border-b border-modern-border flex items-center justify-between bg-slate-50">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-emerald-600 flex items-center justify-center text-white">
+                    <Phone size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black uppercase tracking-tight text-modern-text">Gerenciar WhatsApps</h3>
+                    <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Configure suas contas de atendimento</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowWhatsappManager(false)}
+                  className="w-10 h-10 flex items-center justify-center rounded-none border border-modern-border bg-white text-modern-secondary hover:text-rose-500 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex h-[500px]">
+                {/* Left: Form */}
+                <div className="w-1/2 p-8 border-r border-modern-border bg-white overflow-y-auto custom-scrollbar">
+                  <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Cadastrar Novo</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Nome do Atendente</label>
+                      <input 
+                        type="text"
+                        placeholder="Ex: Carlos - Suporte"
+                        value={whatsappForm.name}
+                        onChange={(e) => setWhatsappForm({ ...whatsappForm, name: e.target.value })}
+                        className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">ID (Número p/ Ícone)</label>
+                        <input 
+                          type="text"
+                          placeholder="Ex: 1"
+                          value={whatsappForm.identifier}
+                          onChange={(e) => setWhatsappForm({ ...whatsappForm, identifier: e.target.value })}
+                          className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Cor</label>
+                        <input 
+                          type="color"
+                          value={whatsappForm.color}
+                          onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                          className="w-full h-[38px] cursor-pointer bg-white border border-modern-border p-1"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Origem / Canal</label>
+                      <input 
+                        type="text"
+                        placeholder="Ex: Instagram, FB Ads"
+                        value={whatsappForm.origin}
+                        onChange={(e) => setWhatsappForm({ ...whatsappForm, origin: e.target.value })}
+                        className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Telefone (Opcional)</label>
+                      <input 
+                        type="text"
+                        placeholder="Ex: 5511..."
+                        value={whatsappForm.phoneNumber}
+                        onChange={(e) => setWhatsappForm({ ...whatsappForm, phoneNumber: e.target.value })}
+                        className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
+                      />
+                    </div>
+                    <button 
+                      onClick={saveWhatsappAccount}
+                      className="w-full bg-emerald-600 text-white py-3 font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/20"
+                    >
+                      Salvar Conta
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right: List */}
+                <div className="w-1/2 p-8 bg-slate-50/50 overflow-y-auto custom-scrollbar">
+                  <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
+                  <div className="space-y-3">
+                    {whatsappAccounts.map(acc => (
+                      <div key={acc.id} className="bg-white border border-modern-border p-4 shadow-sm group">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <div 
+                              className="w-8 h-8 flex items-center justify-center text-white"
+                              style={{ backgroundColor: acc.color }}
+                            >
+                              <span className="text-[10px] font-black">{acc.identifier}</span>
+                            </div>
+                            <div>
+                              <p className="text-xs font-black uppercase text-modern-text truncate max-w-[120px]">{acc.name}</p>
+                              <p className="text-[9px] font-bold text-modern-secondary uppercase">{acc.origin || 'Sem origem'}</p>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => deleteWhatsappAccount(acc.id)}
+                            className="opacity-0 group-hover:opacity-100 w-8 h-8 flex items-center justify-center text-rose-300 hover:text-rose-500 transition-all"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {whatsappAccounts.length === 0 && (
+                      <div className="text-center py-10 opacity-40">
+                        <Phone size={32} className="mx-auto mb-2 text-modern-secondary" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-modern-secondary">Nenhuma conta</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </motion.div>
