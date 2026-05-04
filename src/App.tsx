@@ -688,7 +688,7 @@ export default function App() {
 
             const cleanedTelefone = cleanPhone(telefoneRaw);
 
-            if (rawStatus.startsWith('approved') || rawStatus === 'aprovado' || rawStatus === 'pago' || rawStatus === 'concluido' || rawStatus === 'completo') {
+            if (rawStatus.startsWith('approved') || rawStatus === 'aprovado' || rawStatus === 'paid' || rawStatus === 'pago' || rawStatus === 'succeeded' || rawStatus === 'success' || rawStatus === 'concluido' || rawStatus === 'completo') {
               normalizedStatus = 'Aprovado';
             } else if (rawStatus.startsWith('pending') || rawStatus === 'pendente' || rawStatus === 'aguardando' || rawStatus === 'aguardando pagamento') {
               normalizedStatus = 'Pendente';
