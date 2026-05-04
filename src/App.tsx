@@ -565,7 +565,7 @@ export default function App() {
               normalizedStatus = 'Cancelado';
             } else if (rawStatus === 'reembolsado' || rawStatus === 'devolvido') {
               normalizedStatus = 'Reembolsado';
-            } else if (rawStatus === 'abandonado' || rawStatus === 'carrinho abandonado') {
+            } else if (rawStatus === 'abandonado' || rawStatus === 'carrinho abandonado' || rawStatus === 'lost_cart') {
               normalizedStatus = 'Carrinho Abandonado';
             } else if (rawStatus.startsWith('expired') || rawStatus === 'expirado') {
               normalizedStatus = 'Expirado';
