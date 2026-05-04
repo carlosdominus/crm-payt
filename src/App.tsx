@@ -647,6 +647,7 @@ export default function App() {
           // If PapaParse header: true is used, we can still get the record as an array-like if we need indices
           // However, results.data is already mapped. Let's get the headers in order.
           const headers = results.meta.fields || [];
+          const eHeader = headers[4];  // Column E
           const vHeader = headers[21]; // Column V
 
           const rawLeads: Lead[] = results.data.map((row: any, index: number) => {
@@ -687,6 +688,7 @@ export default function App() {
             let emailRaw = (row['email'] || row['e-mail'] || row['mail'] || '').toString().trim();
 
             const cleanedTelefone = cleanPhone(telefoneRaw);
+            const productFromE = eHeader ? (row[eHeader] || '').toString().trim() : '';
 
             if (rawStatus.startsWith('approved') || rawStatus === 'aprovado' || rawStatus === 'paid' || rawStatus === 'pago' || rawStatus === 'succeeded' || rawStatus === 'success' || rawStatus === 'concluido' || rawStatus === 'completo') {
               normalizedStatus = 'Aprovado';
@@ -712,7 +714,7 @@ export default function App() {
               nome: (row['nome'] || 'Sem Nome').trim(),
               telefone: cleanedTelefone,
               email: emailRaw,
-              produto: (row['produto'] || '').trim(),
+              produto: productFromE || (row['produto'] || '').trim(),
               valor: isNaN(leadValue) ? 'R$ 0,00' : `R$ ${leadValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
               status: normalizedStatus,
               codPay: (row['cod pay'] || '').trim(),
@@ -1273,7 +1275,7 @@ export default function App() {
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Data/Hora</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Status Atual</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] bg-[#f8f9fa]">Total Investido</th>
+                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] bg-[#f8f9fa]">Produto</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
@@ -1501,11 +1503,8 @@ export default function App() {
                         </td>
                         <td className="px-3 py-2 border-b border-[#dadce0]">
                           <div className="flex flex-col">
-                            <p className="text-sm font-semibold text-[#202124]">
-                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(client.totalSpent)}
-                            </p>
-                            <p className="text-[9px] text-[#5f6368] font-medium">
-                              {client.leads.length} {client.leads.length === 1 ? 'Lead' : 'Leads'}
+                            <p className="text-sm font-semibold text-[#202124] truncate max-w-[200px]">
+                              {lastLead?.produto || '-'}
                             </p>
                           </div>
                         </td>
