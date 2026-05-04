@@ -1267,11 +1267,11 @@ export default function App() {
                               {client.status}
                             </div>
                             <div className={cn(
-                              "px-1 py-0.5 rounded-none text-[9px] font-bold uppercase",
-                              !currentTag ? "bg-blue-50 text-blue-600 border border-blue-100" :
-                              currentTag === 'pendente' ? "bg-orange-50 text-orange-600 border border-orange-100" : 
-                              currentTag === 'vendido' ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
-                              "bg-rose-50 text-rose-600 border border-rose-100"
+                              "px-2 py-0.5 rounded-none text-[9px] font-black uppercase shadow-sm flex items-center justify-center",
+                              !currentTag ? "bg-blue-600 text-white" :
+                              currentTag === 'pendente' ? "bg-orange-500 text-white" : 
+                              currentTag === 'vendido' ? "bg-emerald-500 text-white" :
+                              "bg-rose-600 text-white"
                             )}>
                               {!currentTag ? 'Enviar Msg' : 
                                currentTag === 'pendente' ? 'Pendente' : 
