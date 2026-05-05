@@ -843,8 +843,16 @@ export default function App() {
 
           // Pass everything to setClients, auto-tagging is now derived
           const sortedClients = clientsList.map(client => {
+            // Guarantee stable key based on the best available identifier after merging
+            const phone = client.leads.find(l => l.telefone)?.telefone || client.telefone;
+            const email = client.leads.find(l => l.email)?.email || client.email;
+            const name = client.leads.find(l => l.nome && l.nome !== 'Sem Nome')?.nome || client.nome;
+            
+            const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+
             return {
               ...client,
+              key: stableKey,
               leads: client.leads.sort((a, b) => {
                 if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
                 if (b.status === 'Aprovado' && a.status !== 'Aprovado') return 1;
@@ -1392,7 +1400,10 @@ export default function App() {
                                 )}
                               </button>
                               
-                              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-white border border-modern-border shadow-[0_4px_25px_rgba(0,0,0,0.2)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[150] rounded-none">
+                              <div className={cn(
+                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_8px_30px_rgba(0,0,0,0.2)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[150] rounded-none",
+                                idx < 4 ? "top-full mt-2" : "bottom-full mb-2"
+                              )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
                                   <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
                                   <Phone size={12} className="text-modern-secondary" />
@@ -2347,20 +2358,12 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Cor</label>
-                        <div className="flex gap-2 items-center">
-                          <input 
-                            type="color"
-                            value={whatsappForm.color}
-                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                            className="w-12 h-[38px] cursor-pointer bg-white border border-modern-border p-1"
-                          />
-                          <input 
-                            type="text"
-                            value={whatsappForm.color}
-                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                            className="flex-1 bg-slate-50 border border-modern-border px-3 py-2 text-[10px] font-bold text-modern-text focus:outline-none"
-                          />
-                        </div>
+                        <input 
+                          type="color"
+                          value={whatsappForm.color}
+                          onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                          className="w-full h-[38px] cursor-pointer bg-white border border-modern-border p-1"
+                        />
                       </div>
                     </div>
                     <div>
@@ -2411,23 +2414,23 @@ export default function App() {
                 {/* Right: List */}
                 <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6 pb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
                     {whatsappAccounts.map(acc => (
-                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col justify-between">
+                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col min-h-[140px]">
                         <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-4 min-w-0 pr-2">
+                          <div className="flex items-center gap-4 min-w-0 flex-1">
                             <div 
                               className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
                               style={{ backgroundColor: acc.color }}
                             >
                               <span className="text-[11px] font-black">{acc.identifier}</span>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-black uppercase text-modern-text truncate leading-tight mb-0.5">{acc.name}</p>
+                            <div className="min-w-0 flex-1 pr-2">
+                              <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight mb-1">{acc.name}</p>
                               <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-4">
+                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-2">
                             <button 
                               onClick={() => setWhatsappForm(acc as any)}
                               className="w-9 h-9 flex items-center justify-center text-modern-secondary hover:text-emerald-600 bg-slate-50 hover:bg-emerald-50 border border-modern-border transition-all"
