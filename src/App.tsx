@@ -1039,6 +1039,63 @@ export default function App() {
     return Array.from(statuses).sort();
   }, [enrichedClients]);
 
+  const whatsappStats = useMemo(() => {
+    const distributionMap = new Map<string, number>();
+    const salesValueMap = new Map<string, number>();
+    const salesCountMap = new Map<string, number>();
+
+    enrichedClients.forEach(client => {
+      // Exclude "lixo"
+      const tag = getClientTag(client);
+      if (tag === 'lixo') return;
+
+      const whatsappId = client.assignedWhatsappId;
+      const account = whatsappAccounts.find(a => a.id === whatsappId);
+      const name = account ? account.name : 'Não Atribuído';
+
+      // Distribution count
+      distributionMap.set(name, (distributionMap.get(name) || 0) + 1);
+
+      // Manual Sales value
+      if (whatsappId && client.manualSales) {
+        const totalValue = client.manualSales.reduce((acc, s) => acc + s.value, 0);
+        if (totalValue > 0) {
+          salesValueMap.set(name, (salesValueMap.get(name) || 0) + totalValue);
+          salesCountMap.set(name, (salesCountMap.get(name) || 0) + client.manualSales.length);
+        }
+      }
+    });
+
+    const distributionData = Array.from(distributionMap.entries()).map(([name, value]) => {
+      const account = whatsappAccounts.find(a => a.name === name);
+      return { 
+        name, 
+        value, 
+        color: account ? account.color : '#cbd5e1' 
+      };
+    }).sort((a, b) => b.value - a.value);
+
+    // For sales data, always include all accounts even if value is 0
+    const salesData = whatsappAccounts.map(acc => ({
+      name: acc.name,
+      value: salesValueMap.get(acc.name) || 0,
+      count: salesCountMap.get(acc.name) || 0,
+      color: acc.color
+    })).sort((a, b) => b.value - a.value);
+
+    // Also handle "Não Atribuído" if there were sales (unlikely due to UI logic but good for completeness)
+    if (salesValueMap.has('Não Atribuído')) {
+      salesData.push({
+        name: 'Não Atribuído',
+        value: salesValueMap.get('Não Atribuído') || 0,
+        count: salesCountMap.get('Não Atribuído') || 0,
+        color: '#cbd5e1'
+      });
+    }
+
+    return { distributionData, salesData };
+  }, [enrichedClients, whatsappAccounts, clientTags, clientExtraData]);
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -1674,6 +1731,75 @@ export default function App() {
                     <Bar dataKey="count" fill="#3b82f6" radius={[0, 0, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* WhatsApp Analytics Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            <div className="bg-white border border-modern-border p-10 shadow-sm">
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-modern-text mb-10">Distribuição de Contatos por WhatsApp</h3>
+              <div className="h-[350px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={whatsappStats.distributionData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={120}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {whatsappStats.distributionData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '0px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                      formatter={(value: number) => [`${value} contatos`, 'Total']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-4 justify-center">
+                {whatsappStats.distributionData.map((entry, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <div className="w-3 h-3" style={{ backgroundColor: entry.color }} />
+                    <span className="text-[9px] font-bold text-modern-secondary uppercase tracking-tight">{entry.name}: {entry.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white border border-modern-border p-10 shadow-sm">
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-modern-text mb-10">Conversão Manual / WhatsApp (Faturamento)</h3>
+              <div className="h-[350px] w-full">
+                {whatsappStats.salesData.some(s => s.value > 0) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={whatsappStats.salesData} layout="vertical" margin={{ left: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                      <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontBold: 700, fill: '#64748b' }} tickFormatter={(val) => `R$ ${val}`} />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} width={120} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '0px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value: number) => [new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value), 'Faturamento']}
+                      />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                        {whatsappStats.salesData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-center space-y-3">
+                    <div className="w-16 h-16 bg-slate-50 flex items-center justify-center rounded-none text-slate-300">
+                      <DollarSign size={32} />
+                    </div>
+                    <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-widest px-10">Aguardando as primeiras conversões manuais para gerar o gráfico</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
