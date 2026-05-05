@@ -77,5 +77,49 @@ service cloud.firestore {
           && data.timestamp is number;
       }
     }
+
+    // --- WhatsApp Accounts ---
+    match /users/{userId}/whatsappAccounts/{accId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && isValidId(accId)
+        && isValidWhatsAppAccount(incoming())
+        && incoming().id == accId;
+      allow update: if isOwner(userId)
+        && isValidWhatsAppAccount(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isOwner(userId);
+
+      function isValidWhatsAppAccount(data) {
+        return data.keys().hasAll(['id', 'name', 'phoneNumber', 'identifier', 'color', 'createdAt'])
+          && (data.keys().size() == 6 || data.keys().hasAll(['origin']))
+          && data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 100
+          && data.phoneNumber is string && data.phoneNumber.size() <= 30
+          && data.identifier is string && data.identifier.size() <= 20
+          && data.color is string && data.color.size() <= 20
+          && data.createdAt is string;
+      }
+    }
+
+    // --- Client Extra Data ---
+    match /users/{userId}/clientData/{clientKey} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && isValidId(clientKey)
+        && isValidClientData(incoming())
+        && incoming().clientKey == clientKey;
+      allow delete: if isOwner(userId);
+
+      function isValidClientData(data) {
+        return data.keys().hasAll(['clientKey', 'updatedAt'])
+          && data.clientKey is string && data.clientKey.size() <= 128
+          && (data.keys().size() <= 5)
+          && (!data.keys().hasAll(['trackingCode']) || data.trackingCode is string)
+          && (!data.keys().hasAll(['assignedWhatsappId']) || data.assignedWhatsappId is string);
+      }
+    }
   }
 }

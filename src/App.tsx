@@ -153,6 +153,7 @@ export default function App() {
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
+  const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [whatsappForm, setWhatsappForm] = useState({
     name: "",
     origin: "",
@@ -344,8 +345,14 @@ export default function App() {
   }, [authReady, user]);
 
   const saveWhatsappAccount = async () => {
-    if (!user || !whatsappForm.name || !whatsappForm.identifier) return;
+    if (!user) return;
+    
+    if (!whatsappForm.name || !whatsappForm.identifier) {
+      alert("Por favor, preencha o Nome e o ID (Número p/ Ícone).");
+      return;
+    }
 
+    setIsSavingWhatsapp(true);
     const id = (whatsappForm as any).id || Math.random().toString(36).substr(2, 9);
     const newAcc: WhatsAppAccount = {
       ...whatsappForm,
@@ -364,10 +371,15 @@ export default function App() {
         phoneNumber: "",
         identifier: ""
       });
-      setShowWhatsappManager(false);
+      // Don't close immediately so user can see it's done if they have more to add? 
+      // Actually common pattern is to just keep it open or show success.
+      // Let's just reset the form and show the list.
     } catch (error) {
       // @ts-ignore
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/whatsappAccounts/${id}`);
+      alert("Erro ao salvar conta. Verifique sua conexão.");
+    } finally {
+      setIsSavingWhatsapp(false);
     }
   };
 
@@ -2342,9 +2354,15 @@ export default function App() {
                     </div>
                     <button 
                       onClick={saveWhatsappAccount}
-                      className="w-full bg-emerald-600 text-white py-3 font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/20"
+                      disabled={isSavingWhatsapp}
+                      className="w-full bg-emerald-600 text-white py-3 font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      Salvar Conta
+                      {isSavingWhatsapp ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
+                          Salvando...
+                        </>
+                      ) : "Salvar Conta"}
                     </button>
                   </div>
                 </div>
