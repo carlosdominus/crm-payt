@@ -711,10 +711,10 @@ export default function App() {
 
             if (rawStatus.startsWith('approved') || rawStatus === 'aprovado' || rawStatus === 'paid' || rawStatus === 'pago' || rawStatus === 'succeeded' || rawStatus === 'success' || rawStatus === 'concluido' || rawStatus === 'completo') {
               normalizedStatus = 'Aprovado';
-            } else if (rawStatus.startsWith('pending') || rawStatus === 'pendente' || rawStatus === 'aguardando' || rawStatus === 'aguardando pagamento') {
+            } else if (rawStatus.startsWith('pending') || rawStatus === 'pendente' || rawStatus === 'aguardando' || rawStatus === 'aguardando pagamento' || rawStatus === 'waiting_payment') {
               normalizedStatus = 'Pendente';
-            } else if (rawStatus.startsWith('rejected') || rawStatus === 'cancelado' || rawStatus === 'recusado') {
-              normalizedStatus = 'Cancelado';
+            } else if (rawStatus === 'refused' || rawStatus === 'cartao recusado' || rawStatus === 'cartão recusado' || rawStatus === 'rejected' || rawStatus === 'cancelado' || rawStatus === 'recusado') {
+              normalizedStatus = 'Recusado';
             } else if (rawStatus === 'reembolsado' || rawStatus === 'devolvido') {
               normalizedStatus = 'Reembolsado';
             } else if (rawStatus === 'abandonado' || rawStatus === 'carrinho abandonado' || rawStatus === 'lost_cart') {

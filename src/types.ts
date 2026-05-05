@@ -74,6 +74,7 @@ export const STATUS_THEMES: Record<string, { bg: string; text: string }> = {
   "Aprovado": { bg: "bg-[#00BC7D]", text: "text-white" },
   "Pendente": { bg: "bg-[#FE9900]", text: "text-white" },
   "Cancelado": { bg: "bg-[#EC1A40]", text: "text-white" },
+  "Recusado": { bg: "bg-[#EC1A40]", text: "text-white" },
   "Reembolsado": { bg: "bg-blue-500", text: "text-white" },
   "Carrinho Abandonado": { bg: "bg-[#8FA1B9]", text: "text-white" },
   "Expirado": { bg: "bg-[#F44900]", text: "text-white" },
