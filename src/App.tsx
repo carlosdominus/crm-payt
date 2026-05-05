@@ -2295,7 +2295,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl bg-white shadow-2xl z-[101] overflow-hidden flex flex-col h-[700px]"
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-6xl bg-white shadow-2xl z-[101] overflow-hidden flex flex-col h-[700px]"
             >
               <div className="p-8 border-b border-modern-border flex items-center justify-between bg-slate-50">
                 <div className="flex items-center gap-4">
@@ -2320,7 +2320,7 @@ export default function App() {
 
               <div className="flex flex-1 overflow-hidden">
                 {/* Left: Form */}
-                <div className="w-[400px] p-8 border-r border-modern-border bg-white overflow-y-auto custom-scrollbar">
+                <div className="w-[380px] p-8 border-r border-modern-border bg-white overflow-y-auto custom-scrollbar">
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">
                     {(whatsappForm as any).id ? "Editar Conta" : "Cadastrar Novo"}
                   </h4>
@@ -2332,7 +2332,7 @@ export default function App() {
                         placeholder="Ex: Carlos - Suporte"
                         value={whatsappForm.name}
                         onChange={(e) => setWhatsappForm({ ...whatsappForm, name: e.target.value })}
-                        className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -2348,20 +2348,12 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Cor</label>
-                        <div className="flex gap-2 items-center">
-                          <input 
-                            type="color"
-                            value={whatsappForm.color}
-                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                            className="w-12 h-[38px] cursor-pointer bg-white border border-modern-border p-1"
-                          />
-                          <input 
-                            type="text"
-                            value={whatsappForm.color}
-                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                            className="flex-1 bg-slate-50 border border-modern-border px-3 py-2 text-[10px] font-bold text-modern-text focus:outline-none"
-                          />
-                        </div>
+                        <input 
+                          type="color"
+                          value={whatsappForm.color}
+                          onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                          className="w-full h-[38px] cursor-pointer bg-white border border-modern-border p-1"
+                        />
                       </div>
                     </div>
                     <div>
@@ -2410,13 +2402,13 @@ export default function App() {
                 </div>
 
                 {/* Right: List */}
-                <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
+              <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 pb-4">
                     {whatsappAccounts.map(acc => (
-                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-4 min-w-0">
+                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col justify-between">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-4 min-w-0 pr-2">
                             <div 
                               className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
                               style={{ backgroundColor: acc.color }}
@@ -2424,8 +2416,8 @@ export default function App() {
                               <span className="text-[11px] font-black">{acc.identifier}</span>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-black uppercase text-modern-text break-all leading-tight">{acc.name}</p>
-                              <p className="text-[9px] font-bold text-modern-secondary uppercase mt-0.5 tracking-wider">{acc.origin || 'Sem origem'}</p>
+                              <p className="text-sm font-black uppercase text-modern-text truncate leading-tight mb-0.5">{acc.name}</p>
+                              <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-4">
