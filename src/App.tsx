@@ -798,6 +798,7 @@ export default function App() {
                 existing.email = lead.email;
                 emailMap.set(lead.email.toLowerCase().trim(), existing);
               }
+
               if (existing.nome === 'Sem Nome' && lead.nome !== 'Sem Nome') {
                 existing.nome = lead.nome;
                 if (nameKey) nameMap.set(nameKey, existing);
@@ -818,7 +819,10 @@ export default function App() {
                 }
               }
             } else {
-              const clientKey = (lead.email || lead.telefone || lead.nome).toLowerCase().trim();
+              // Deterministic key: phone OR email OR name
+              // BUT we prefix it to avoid collisions between different types
+              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
+              
               const newClient: Client = {
                 email: lead.email,
                 nome: lead.nome,
@@ -839,13 +843,8 @@ export default function App() {
 
           // Pass everything to setClients, auto-tagging is now derived
           const sortedClients = clientsList.map(client => {
-            // Ensure stable key: always prefer email, then phone, then name
-            // regardless of which lead was processed first during merging
-            const stableKey = (client.email || client.telefone || client.nome).toLowerCase().trim();
-            
             return {
               ...client,
-              key: stableKey,
               leads: client.leads.sort((a, b) => {
                 if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
                 if (b.status === 'Aprovado' && a.status !== 'Aprovado') return 1;
@@ -1317,7 +1316,7 @@ export default function App() {
                       <motion.tr 
                         key={clientKey}
                         onClick={() => setSelectedClient(client)}
-                        className="group transition-colors cursor-pointer hover:bg-[#f1f3f4]"
+                        className="group transition-colors cursor-pointer hover:bg-[#f1f3f4] relative hover:z-[60]"
                         initial={false}
                         animate={{ opacity: 1 }}
                       >
@@ -1380,23 +1379,23 @@ export default function App() {
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
                                   "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
-                                  client.assignedWhatsappId 
+                                  (client.assignedWhatsappId && assignedAcc)
                                     ? "text-white" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
                                 )}
-                                style={client.assignedWhatsappId && assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
+                                style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
-                                {client.assignedWhatsappId && assignedAcc ? (
+                                {(client.assignedWhatsappId && assignedAcc) ? (
                                   <span className="text-[11px] font-black">{assignedAcc.identifier}</span>
                                 ) : (
                                   <Phone size={14} />
                                 )}
                               </button>
                               
-                              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 bg-white border border-modern-border shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[100] rounded-none">
-                                <div className="p-2.5 border-b border-modern-border bg-slate-50 flex items-center justify-between">
-                                  <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
-                                  <Phone size={10} className="text-modern-secondary" />
+                              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-white border border-modern-border shadow-[0_4px_25px_rgba(0,0,0,0.2)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[150] rounded-none">
+                                <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
+                                  <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
+                                  <Phone size={12} className="text-modern-secondary" />
                                 </div>
                                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
                                   {client.assignedWhatsappId && (
@@ -2348,12 +2347,20 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Cor</label>
-                        <input 
-                          type="color"
-                          value={whatsappForm.color}
-                          onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                          className="w-full h-[38px] cursor-pointer bg-white border border-modern-border p-1"
-                        />
+                        <div className="flex gap-2 items-center">
+                          <input 
+                            type="color"
+                            value={whatsappForm.color}
+                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                            className="w-12 h-[38px] cursor-pointer bg-white border border-modern-border p-1"
+                          />
+                          <input 
+                            type="text"
+                            value={whatsappForm.color}
+                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                            className="flex-1 bg-slate-50 border border-modern-border px-3 py-2 text-[10px] font-bold text-modern-text focus:outline-none"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div>
@@ -2402,9 +2409,9 @@ export default function App() {
                 </div>
 
                 {/* Right: List */}
-              <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 pb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6 pb-4">
                     {whatsappAccounts.map(acc => (
                       <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col justify-between">
                         <div className="flex items-start justify-between">
