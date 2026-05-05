@@ -1298,11 +1298,13 @@ export default function App() {
                       </tr>
                     ))
                   ) : pagedClients.map((client, idx) => {
+                    if (!client) return null;
                     const clientKey = client.key;
                     const manualTag = clientTags[clientKey];
                     const currentTag = getClientTag(client);
                     
                     const lastLead = client.leads[0]; // Leads are sorted by timestamp desc
+                    const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
 
                     return (
                       <motion.tr 
@@ -1365,19 +1367,20 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-3 py-2 border-b border-r border-[#dadce0] overflow-visible">
-                          <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                            <div className="relative group/zap">
+                          <div className="flex items-center justify-center">
+                            <div className="relative group/zap" onClick={(e) => e.stopPropagation()}>
                               <button 
+                                onClick={(e) => e.stopPropagation()}
                                 className={cn(
                                   "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
                                   client.assignedWhatsappId 
                                     ? "text-white" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
                                 )}
-                                style={client.assignedWhatsappId ? { backgroundColor: whatsappAccounts.find(a => a.id === client.assignedWhatsappId)?.color } : {}}
+                                style={client.assignedWhatsappId && assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
                               >
-                                {client.assignedWhatsappId ? (
-                                  <span className="text-[11px] font-black">{whatsappAccounts.find(a => a.id === client.assignedWhatsappId)?.identifier}</span>
+                                {client.assignedWhatsappId && assignedAcc ? (
+                                  <span className="text-[11px] font-black">{assignedAcc.identifier}</span>
                                 ) : (
                                   <Phone size={14} />
                                 )}
@@ -1385,13 +1388,16 @@ export default function App() {
                               
                               <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-56 bg-white border border-modern-border shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[100] rounded-none">
                                 <div className="p-2.5 border-b border-modern-border bg-slate-50 flex items-center justify-between">
-                                  <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest">Atribuir WhatsApp</p>
+                                  <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
                                   <Phone size={10} className="text-modern-secondary" />
                                 </div>
                                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
                                   {client.assignedWhatsappId && (
                                     <button 
-                                      onClick={() => updateClientExtra(client.key, { assignedWhatsappId: "" })}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateClientExtra(clientKey, { assignedWhatsappId: "" });
+                                      }}
                                       className="w-full text-left px-3 py-3 text-[10px] font-bold hover:bg-rose-50 flex items-center gap-2 border-b border-modern-border/30 text-rose-600 uppercase tracking-tighter transition-colors"
                                     >
                                       <div className="w-5 h-5 flex items-center justify-center bg-rose-100 text-rose-600">
@@ -1403,7 +1409,10 @@ export default function App() {
                                   {whatsappAccounts.map(acc => (
                                     <button 
                                       key={acc.id}
-                                      onClick={() => updateClientExtra(client.key, { assignedWhatsappId: acc.id })}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
+                                      }}
                                       className={cn(
                                         "w-full text-left px-3 py-3 text-[11px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
                                         client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
@@ -1426,7 +1435,10 @@ export default function App() {
                                 </div>
                                 <div className="p-2 border-t border-modern-border bg-slate-50">
                                   <button 
-                                    onClick={() => setShowWhatsappManager(true)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowWhatsappManager(true);
+                                    }}
                                     className="w-full py-2 text-[9px] font-black uppercase text-modern-primary hover:text-modern-text transition-colors text-center"
                                   >
                                     Configurar Contas
