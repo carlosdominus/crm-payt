@@ -2276,7 +2276,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-white shadow-2xl z-[101] overflow-hidden flex flex-col"
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl bg-white shadow-2xl z-[101] overflow-hidden flex flex-col h-[700px]"
             >
               <div className="p-8 border-b border-modern-border flex items-center justify-between bg-slate-50">
                 <div className="flex items-center gap-4">
@@ -2289,17 +2289,22 @@ export default function App() {
                   </div>
                 </div>
                 <button 
-                  onClick={() => setShowWhatsappManager(false)}
+                  onClick={() => {
+                    setShowWhatsappManager(false);
+                    setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "" });
+                  }}
                   className="w-10 h-10 flex items-center justify-center rounded-none border border-modern-border bg-white text-modern-secondary hover:text-rose-500 transition-colors"
                 >
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="flex h-[500px]">
+              <div className="flex flex-1 overflow-hidden">
                 {/* Left: Form */}
-                <div className="w-1/2 p-8 border-r border-modern-border bg-white overflow-y-auto custom-scrollbar">
-                  <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Cadastrar Novo</h4>
+                <div className="w-[400px] p-8 border-r border-modern-border bg-white overflow-y-auto custom-scrollbar">
+                  <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">
+                    {(whatsappForm as any).id ? "Editar Conta" : "Cadastrar Novo"}
+                  </h4>
                   <div className="space-y-4">
                     <div>
                       <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Nome do Atendente</label>
@@ -2324,12 +2329,20 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Cor</label>
-                        <input 
-                          type="color"
-                          value={whatsappForm.color}
-                          onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
-                          className="w-full h-[38px] cursor-pointer bg-white border border-modern-border p-1"
-                        />
+                        <div className="flex gap-2 items-center">
+                          <input 
+                            type="color"
+                            value={whatsappForm.color}
+                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                            className="w-12 h-[38px] cursor-pointer bg-white border border-modern-border p-1"
+                          />
+                          <input 
+                            type="text"
+                            value={whatsappForm.color}
+                            onChange={(e) => setWhatsappForm({ ...whatsappForm, color: e.target.value })}
+                            className="flex-1 bg-slate-50 border border-modern-border px-3 py-2 text-[10px] font-bold text-modern-text focus:outline-none"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div>
@@ -2352,53 +2365,80 @@ export default function App() {
                         className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
                       />
                     </div>
-                    <button 
-                      onClick={saveWhatsappAccount}
-                      disabled={isSavingWhatsapp}
-                      className="w-full bg-emerald-600 text-white py-3 font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isSavingWhatsapp ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
-                          Salvando...
-                        </>
-                      ) : "Salvar Conta"}
-                    </button>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <button 
+                        onClick={saveWhatsappAccount}
+                        disabled={isSavingWhatsapp}
+                        className="w-full bg-emerald-600 text-white py-3 font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {isSavingWhatsapp ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
+                            Salvando...
+                          </>
+                        ) : (whatsappForm as any).id ? "Atualizar Conta" : "Salvar Conta"}
+                      </button>
+                      {(whatsappForm as any).id && (
+                        <button 
+                          onClick={() => setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "" })}
+                          className="w-full bg-slate-100 text-modern-secondary py-3 font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* Right: List */}
-                <div className="w-1/2 p-8 bg-slate-50/50 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     {whatsappAccounts.map(acc => (
-                      <div key={acc.id} className="bg-white border border-modern-border p-4 shadow-sm group">
+                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-4 min-w-0">
                             <div 
-                              className="w-8 h-8 flex items-center justify-center text-white"
+                              className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
                               style={{ backgroundColor: acc.color }}
                             >
-                              <span className="text-[10px] font-black">{acc.identifier}</span>
+                              <span className="text-[11px] font-black">{acc.identifier}</span>
                             </div>
-                            <div>
-                              <p className="text-xs font-black uppercase text-modern-text truncate max-w-[120px]">{acc.name}</p>
-                              <p className="text-[9px] font-bold text-modern-secondary uppercase">{acc.origin || 'Sem origem'}</p>
+                            <div className="min-w-0">
+                              <p className="text-sm font-black uppercase text-modern-text break-all leading-tight">{acc.name}</p>
+                              <p className="text-[9px] font-bold text-modern-secondary uppercase mt-0.5 tracking-wider">{acc.origin || 'Sem origem'}</p>
                             </div>
                           </div>
-                          <button 
-                            onClick={() => deleteWhatsappAccount(acc.id)}
-                            className="opacity-0 group-hover:opacity-100 w-8 h-8 flex items-center justify-center text-rose-300 hover:text-rose-500 transition-all"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-4">
+                            <button 
+                              onClick={() => setWhatsappForm(acc as any)}
+                              className="w-9 h-9 flex items-center justify-center text-modern-secondary hover:text-emerald-600 bg-slate-50 hover:bg-emerald-50 border border-modern-border transition-all"
+                              title="Editar"
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <button 
+                              onClick={() => deleteWhatsappAccount(acc.id)}
+                              className="w-9 h-9 flex items-center justify-center text-modern-secondary hover:text-rose-500 bg-slate-50 hover:bg-rose-50 border border-modern-border transition-all"
+                              title="Excluir"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
+                        {acc.phoneNumber && (
+                          <div className="mt-3 pt-3 border-t border-slate-100">
+                            <p className="text-[10px] font-bold text-modern-secondary flex items-center gap-2">
+                               <Phone size={12} className="text-emerald-500" /> {acc.phoneNumber}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {whatsappAccounts.length === 0 && (
-                      <div className="text-center py-10 opacity-40">
-                        <Phone size={32} className="mx-auto mb-2 text-modern-secondary" />
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-modern-secondary">Nenhuma conta</p>
+                      <div className="col-span-full text-center py-20 opacity-40">
+                        <Phone size={48} className="mx-auto mb-4 text-modern-secondary" />
+                        <p className="text-xs font-bold uppercase tracking-widest text-modern-secondary italic">Nenhuma conta cadastrada</p>
                       </div>
                     )}
                   </div>
