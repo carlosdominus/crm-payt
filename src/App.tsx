@@ -19,6 +19,7 @@ import {
   Filter,
   ChevronDown,
   Phone,
+  Edit,
   Mail,
   LayoutDashboard,
   Plus,
@@ -406,6 +407,12 @@ export default function App() {
       };
       
       await setDoc(docRef, newData, { merge: true });
+
+      // Local update for immediate feedback
+      setClientExtraData(prev => ({
+        ...prev,
+        [clientKey]: newData
+      }));
 
       // Sync with Google Sheets if URL is configured
       if (sheetSyncUrl) {
@@ -898,7 +905,7 @@ export default function App() {
         assignedWhatsappId: clientExtraData[client.key]?.assignedWhatsappId
       };
     });
-  }, [clients, manualSales]);
+  }, [clients, manualSales, clientExtraData]);
 
   const filteredClients = useMemo(() => {
     const now = new Date();
@@ -1386,7 +1393,7 @@ export default function App() {
                                 )}
                               </button>
                               
-                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-56 bg-white border border-modern-border shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[100] rounded-none">
+                              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 bg-white border border-modern-border shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[100] rounded-none">
                                 <div className="p-2.5 border-b border-modern-border bg-slate-50 flex items-center justify-between">
                                   <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
                                   <Phone size={10} className="text-modern-secondary" />
@@ -1400,7 +1407,7 @@ export default function App() {
                                       }}
                                       className="w-full text-left px-3 py-3 text-[10px] font-bold hover:bg-rose-50 flex items-center gap-2 border-b border-modern-border/30 text-rose-600 uppercase tracking-tighter transition-colors"
                                     >
-                                      <div className="w-5 h-5 flex items-center justify-center bg-rose-100 text-rose-600">
+                                      <div className="w-5 h-5 flex items-center justify-center bg-rose-100 text-rose-600 shrink-0">
                                         <X size={12} />
                                       </div>
                                       Remover Atribuição
