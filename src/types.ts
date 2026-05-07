@@ -55,21 +55,6 @@ export interface WorkspaceInvite {
   createdAt: string;
 }
 
-export interface WorkspaceCode {
-  code: string;
-  ownerUid: string;
-  ownerEmail: string;
-  createdAt: string;
-}
-
-export interface WorkspaceLink {
-  guestUid: string;
-  guestEmail: string;
-  ownerUid: string;
-  ownerEmail: string;
-  linkedAt: string;
-}
-
 export interface Client {
   email: string;
   nome: string;
