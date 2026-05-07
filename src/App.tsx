@@ -45,12 +45,13 @@ import {
   onSnapshot, 
   query, 
   orderBy,
+  where,
   User,
   handleFirestoreError,
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -150,6 +151,7 @@ export default function App() {
   const [customEndDate, setCustomEndDate] = useState<string>("");
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'partners'>('general');
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard'>('crm');
@@ -187,82 +189,113 @@ export default function App() {
     return null;
   };
   
-  // Auth state
+  // Auth and Workspace state
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [effectiveWorkspaceId, setEffectiveWorkspaceId] = useState<string | null>(null);
+  const [effectiveOwnerEmail, setEffectiveOwnerEmail] = useState<string | null>(null);
+  const [myInvites, setMyInvites] = useState<WorkspaceInvite[]>([]);
+  const [mySentInvites, setMySentInvites] = useState<WorkspaceInvite[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setAuthReady(true);
+      if (!u) {
+        setEffectiveWorkspaceId(null);
+        setEffectiveOwnerEmail(null);
+        setAuthReady(true);
+      }
     });
     return () => unsubscribe();
   }, []);
 
+  // Listen for invites received by the logged-in user
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(collection(db, 'invites'), where('inviteeEmail', '==', user.email));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const invites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite));
+      setMyInvites(invites);
+
+      // determine workspace: if invited by someone, use their UID
+      // For simplicity, we use the first valid invite found
+      const activeInvite = invites.find(i => i.status === 'accepted' || i.inviteeEmail === user.email);
+      if (activeInvite) {
+        setEffectiveWorkspaceId(activeInvite.ownerUid);
+        setEffectiveOwnerEmail(activeInvite.ownerEmail);
+      } else {
+        setEffectiveWorkspaceId(user.uid);
+        setEffectiveOwnerEmail(user.email);
+      }
+      setAuthReady(true);
+    }, (error) => {
+      console.error("Erro ao buscar convites:", error);
+      setEffectiveWorkspaceId(user.uid);
+      setEffectiveOwnerEmail(user.email);
+      setAuthReady(true);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Listen for invites SENT by the logged-in user
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'invites'), where('ownerUid', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setMySentInvites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite)));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const sendInvite = async () => {
+    if (!user || !inviteEmail) return;
+    setIsInviting(true);
+    const inviteId = Math.random().toString(36).substring(2, 15);
+    try {
+      await setDoc(doc(db, 'invites', inviteId), {
+        id: inviteId,
+        ownerEmail: user.email,
+        ownerUid: user.uid,
+        inviteeEmail: inviteEmail.toLowerCase().trim(),
+        status: 'accepted', // Auto-accepted for now to simplify
+        createdAt: new Date().toISOString()
+      });
+      setInviteEmail("");
+    } catch (e) {
+      console.error("Erro ao enviar convite:", e);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const removeInvite = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'invites', id));
+    } catch (e) {
+      console.error("Erro ao remover convite:", e);
+    }
+  };
+
   const handleLogin = async () => {
-    setAuthError(null);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error("Erro ao fazer login:", error);
-      setAuthError(error.message || "Erro desconhecido ao fazer login");
     }
   };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      setEffectiveWorkspaceId(null);
     } catch (error) {
       console.error("Erro ao fazer logout:", error);
     }
   };
-
-  // Migration logic: Move local data to cloud upon login
-  useEffect(() => {
-    if (user) {
-      const migrateData = async () => {
-        const localSales = localStorage.getItem('crm_manual_sales');
-        const localTags = localStorage.getItem('crm_client_tags');
-
-        if (localSales) {
-          try {
-            const sales = JSON.parse(localSales) as ManualSale[];
-            for (const sale of sales) {
-              await setDoc(doc(db, `users/${user.uid}/sales`, sale.id), sale);
-            }
-            localStorage.removeItem('crm_manual_sales');
-          } catch (e) {
-            console.error("Erro ao migrar vendas:", e);
-          }
-        }
-
-        if (localTags) {
-          try {
-            const tags = JSON.parse(localTags) as Record<string, any>;
-            for (const [clientKey, rawTag] of Object.entries(tags)) {
-              // Normalize tag names if they are old
-              let tag = rawTag;
-              if (tag === 'entrar em contato') tag = 'pendente';
-              else if (tag === 'contato enviado') tag = 'feito';
-
-              if (tag) {
-                await setDoc(doc(db, `users/${user.uid}/tags`, clientKey), {
-                  clientKey,
-                  tag,
-                  updatedAt: new Date().toISOString()
-                });
-              }
-            }
-            localStorage.removeItem('crm_client_tags');
-          } catch (e) {
-            console.error("Erro ao migrar tags:", e);
-          }
-        }
-      };
-      migrateData();
-    }
-  }, [user]);
 
   // Pagination state
   const [visibleCount, setVisibleCount] = useState(50);
@@ -273,24 +306,24 @@ export default function App() {
   const [manualSales, setManualSales] = useState<ManualSale[]>([]);
 
   useEffect(() => {
-    if (!authReady) return;
-
-    if (!user) {
-      const saved = localStorage.getItem('crm_manual_sales');
-      setManualSales(saved ? JSON.parse(saved) : []);
+    if (!authReady || !effectiveWorkspaceId) {
+      if (!user && authReady) {
+        const saved = localStorage.getItem('crm_manual_sales');
+        setManualSales(saved ? JSON.parse(saved) : []);
+      }
       return;
     }
 
-    const q = query(collection(db, `users/${user.uid}/sales`), orderBy('timestamp', 'desc'));
+    const q = query(collection(db, `users/${effectiveWorkspaceId}/sales`), orderBy('timestamp', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const sales = snapshot.docs.map(doc => doc.data() as ManualSale);
       setManualSales(sales);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/sales`);
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/sales`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, effectiveWorkspaceId]);
 
   const [showAddSaleModal, setShowAddSaleModal] = useState(false);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
@@ -312,45 +345,43 @@ export default function App() {
   
   // Tagging state
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !effectiveWorkspaceId) {
       setClientExtraData({});
       return;
     }
 
-    const unsubscribe = onSnapshot(collection(db, `users/${user.uid}/clientData`), (snapshot) => {
+    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/clientData`), (snapshot) => {
       const data: Record<string, any> = {};
       snapshot.docs.forEach(doc => {
         data[doc.id] = doc.data();
       });
       setClientExtraData(data);
     }, (error) => {
-      // @ts-ignore
-      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/clientData`);
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/clientData`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, effectiveWorkspaceId]);
 
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !effectiveWorkspaceId) {
       setWhatsappAccounts([]);
       return;
     }
 
-    const q = query(collection(db, `users/${user.uid}/whatsappAccounts`), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, `users/${effectiveWorkspaceId}/whatsappAccounts`), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const accounts = snapshot.docs.map(doc => doc.data() as WhatsAppAccount);
       setWhatsappAccounts(accounts);
     }, (error) => {
-      // @ts-ignore
-      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/whatsappAccounts`);
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/whatsappAccounts`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, effectiveWorkspaceId]);
 
   const saveWhatsappAccount = async () => {
-    if (!user) return;
+    if (!user || !effectiveWorkspaceId) return;
     
     if (!whatsappForm.name || !whatsappForm.identifier) {
       alert("Por favor, preencha o Nome e o ID (Número p/ Ícone).");
@@ -365,7 +396,7 @@ export default function App() {
     } as WhatsAppAccount;
 
     try {
-      await setDoc(doc(db, `users/${user.uid}/whatsappAccounts`, id), {
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, id), {
         ...newAcc,
         createdAt: new Date().toISOString()
       });
@@ -380,8 +411,7 @@ export default function App() {
       // Actually common pattern is to just keep it open or show success.
       // Let's just reset the form and show the list.
     } catch (error) {
-      // @ts-ignore
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/whatsappAccounts/${id}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/whatsappAccounts/${id}`);
       alert("Erro ao salvar conta. Verifique sua conexão.");
     } finally {
       setIsSavingWhatsapp(false);
@@ -389,12 +419,11 @@ export default function App() {
   };
 
   const deleteWhatsappAccount = async (id: string) => {
-    if (!user) return;
+    if (!user || !effectiveWorkspaceId) return;
     try {
-      await deleteDoc(doc(db, `users/${user.uid}/whatsappAccounts`, id));
+      await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, id));
     } catch (error) {
-      // @ts-ignore
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/whatsappAccounts/${id}`);
+      handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/whatsappAccounts/${id}`);
     }
   };
 
@@ -1193,6 +1222,12 @@ export default function App() {
               <div className="h-4 w-px bg-modern-border" />
               <p className="text-xs font-semibold text-modern-secondary">Controle de Leads</p>
             </div>
+            {effectiveOwnerEmail && user && effectiveOwnerEmail !== user.email && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-tighter">
+                <Users size={12} className="text-emerald-500" />
+                Dono: {effectiveOwnerEmail.split('@')[0]}
+              </div>
+            )}
             <div className="flex items-center gap-2 ml-4">
               <button 
                 onClick={() => setShowOnlyManualSales(!showOnlyManualSales)}
@@ -2411,104 +2446,204 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white shadow-2xl z-[70] p-8 rounded-none border border-modern-border"
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl bg-white shadow-2xl z-[70] p-0 rounded-none border border-modern-border overflow-hidden"
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between p-8 border-b border-modern-border">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-modern-primary/10 flex items-center justify-center text-modern-primary">
-                    <Database size={18} />
+                    <Settings size={18} />
                   </div>
-                  <h3 className="text-lg font-bold text-modern-text">Sincronização com Planilha</h3>
+                  <h3 className="text-lg font-bold text-modern-text uppercase tracking-widest">Configurações</h3>
                 </div>
                 <button onClick={() => setShowSettings(false)} className="text-modern-secondary hover:text-modern-text">
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="space-y-6">
-                <div className="p-4 bg-blue-50 border border-blue-100 text-blue-800 text-xs leading-relaxed">
-                  <p className="font-bold mb-1">Como configurar:</p>
-                  <ol className="list-decimal ml-4 space-y-1">
-                    <li>Na sua planilha, vá em <b>Extensões &gt; Apps Script</b>.</li>
-                    <li>Cole o código que eu te passei no chat.</li>
-                    <li>Clique em <b>Implantar &gt; Nova Implantação</b>.</li>
-                    <li>Selecione <b>App da Web</b> e em "Quem tem acesso" escolha <b>Qualquer pessoa</b>.</li>
-                    <li>Copie o URL gerado e cole abaixo.</li>
-                  </ol>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL do Webhook (Receber Leads)</label>
-                    <input 
-                      type="text" 
-                      value={webhookUrl}
-                      onChange={(e) => setWebhookUrl(e.target.value)}
-                      placeholder="URL para receber dados da planilha"
-                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL de Sincronização (Atualizar Planilha)</label>
-                    <input 
-                      type="text" 
-                      value={sheetSyncUrl}
-                      onChange={(e) => setSheetSyncUrl(e.target.value)}
-                      placeholder="URL do Web App para salvar dados de volta"
-                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-modern-border">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary mb-4 block">Sincronização em Nuvem (Multi-dispositivo)</label>
-                  {authError && (
-                    <div className="mb-4 p-3 bg-red-50 border border-red-100 text-red-600 text-[10px] font-bold uppercase tracking-wider">
-                      Erro: {authError}
-                    </div>
+              {/* Tabs */}
+              <div className="flex border-b border-modern-border">
+                <button 
+                  onClick={() => setActiveSettingsTab('general')}
+                  className={cn(
+                    "flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeSettingsTab === 'general' ? "border-b-2 border-modern-primary text-modern-primary bg-slate-50" : "text-modern-secondary hover:bg-slate-50"
                   )}
-                  {user ? (
-                    <div className="flex items-center justify-between p-4 bg-emerald-50 border border-emerald-100">
-                      <div className="flex items-center gap-3">
-                        {user.photoURL && <img src={user.photoURL} alt={user.displayName || ''} className="w-8 h-8 rounded-full" referrerPolicy="no-referrer" />}
-                        <div>
-                          <p className="text-xs font-bold text-modern-text">{user.displayName}</p>
-                          <p className="text-[10px] text-emerald-600 font-medium">Sincronizado na Nuvem</p>
-                        </div>
+                >
+                  Sincronização & Login
+                </button>
+                <button 
+                  onClick={() => setActiveSettingsTab('partners')}
+                  className={cn(
+                    "flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeSettingsTab === 'partners' ? "border-b-2 border-modern-primary text-modern-primary bg-slate-50" : "text-modern-secondary hover:bg-slate-50"
+                  )}
+                >
+                  Sócios & Gestores
+                </button>
+              </div>
+
+              <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                {activeSettingsTab === 'general' ? (
+                  <div className="space-y-6">
+                    <div className="p-4 bg-blue-50 border border-blue-100 text-blue-800 text-[10px] leading-relaxed uppercase font-bold">
+                      <p className="mb-2 flex items-center gap-2"><Database size={12} /> Integração com Planilha:</p>
+                      <ol className="list-decimal ml-4 space-y-1">
+                        <li>Na sua planilha, vá em Extensões &gt; Apps Script.</li>
+                        <li>Cole o código de sincronização.</li>
+                        <li>Implante como App da Web (acesso: Qualquer pessoa).</li>
+                        <li>Cole os URLs abaixo para receber leads e salvar vendas.</li>
+                      </ol>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL do Webhook (Receber Leads)</label>
+                        <input 
+                          type="text" 
+                          value={webhookUrl}
+                          onChange={(e) => setWebhookUrl(e.target.value)}
+                          placeholder="URL para receber dados da planilha"
+                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
                       </div>
-                      <button 
-                        onClick={handleLogout}
-                        className="text-[10px] font-bold uppercase tracking-wider text-red-600 hover:underline"
-                      >
-                        Sair
-                      </button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={handleLogin}
-                      className="w-full py-4 bg-modern-text text-white font-bold text-xs uppercase tracking-widest hover:bg-black transition-all flex items-center justify-center gap-3"
-                    >
-                      <Users size={18} /> Entrar com Google para Sincronizar
-                    </button>
-                  )}
-                </div>
 
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL de Sincronização (Exportar)</label>
+                        <input 
+                          type="text" 
+                          value={sheetSyncUrl}
+                          onChange={(e) => setSheetSyncUrl(e.target.value)}
+                          placeholder="URL do Web App p/ atualizar sua planilha"
+                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-modern-border">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary mb-4 block">Sincronização em Nuvem</label>
+                      {user ? (
+                        <div className="p-4 bg-slate-50 border border-modern-border flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {user.photoURL && <img src={user.photoURL} alt={user.displayName || ''} className="w-8 h-8 rounded-full" referrerPolicy="no-referrer" />}
+                            <div>
+                              <p className="text-xs font-bold text-modern-text">{user.displayName}</p>
+                              <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-tight">Login Ativo</p>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={handleLogout}
+                            className="text-[10px] font-bold uppercase tracking-wider text-rose-500 hover:underline"
+                          >
+                            Sair
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={handleLogin}
+                          className="w-full py-4 bg-modern-text text-white font-bold text-xs uppercase tracking-widest hover:bg-black transition-all flex items-center justify-center gap-3"
+                        >
+                          <Users size={18} /> Conectar Conta Google
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="p-4 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[10px] leading-relaxed uppercase font-bold">
+                      <p className="mb-2 flex items-center gap-2"><Users size={14}/> Compartilhamento de Acesso:</p>
+                      <p className="normal-case font-medium">Os e-mails convidados terão acesso total ao seu CRM, Dashboard e Tags. Perfeito para sócios e gestores de tráfego.</p>
+                    </div>
+
+                    {!user ? (
+                      <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border">
+                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para gerenciar sócios</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Convidar por E-mail</label>
+                            <div className="flex gap-2">
+                              <input 
+                                type="email" 
+                                value={inviteEmail}
+                                onChange={(e) => setInviteEmail(e.target.value)}
+                                placeholder="E-mail do seu sócio"
+                                className="flex-1 px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none"
+                              />
+                              <button 
+                                onClick={sendInvite}
+                                disabled={isInviting || !inviteEmail}
+                                className="bg-modern-primary text-white px-6 py-3 font-bold text-xs uppercase tracking-widest hover:bg-modern-primary/90 disabled:opacity-50 transition-all flex items-center gap-2"
+                              >
+                                {isInviting ? "..." : <Plus size={16} />} 
+                                Convidar
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block border-b border-modern-border pb-2">Acessos Autorizados</label>
+                          {mySentInvites.length === 0 ? (
+                            <p className="text-[10px] text-modern-secondary italic py-4">Nenhum sócio convidado ainda.</p>
+                          ) : (
+                            mySentInvites.map((invite) => (
+                              <div key={invite.id} className="flex items-center justify-between p-3 bg-slate-50 border border-modern-border group">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-white border border-modern-border flex items-center justify-center text-modern-secondary">
+                                    <Mail size={14} />
+                                  </div>
+                                  <p className="text-xs font-bold text-modern-text">{invite.inviteeEmail}</p>
+                                </div>
+                                <button 
+                                  onClick={() => removeInvite(invite.id)}
+                                  className="text-rose-400 p-2 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition-all"
+                                  title="Remover Acesso"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {myInvites.length > 0 && (
+                          <div className="space-y-3 pt-6 border-t border-modern-border">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Workspaces que você acessa</label>
+                            {myInvites.map((invite) => (
+                              <div key={invite.id} className="p-3 bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle2 size={14} className="text-emerald-500" />
+                                  <p className="text-[10px] font-bold text-emerald-800 uppercase italic">Dados de: {invite.ownerEmail}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-8 bg-slate-50 border-t border-modern-border">
                 <button 
                   onClick={() => {
                     localStorage.setItem('crm_webhook_url', webhookUrl);
                     localStorage.setItem('crm_sheet_sync_url', sheetSyncUrl);
                     setShowSettings(false);
                   }}
-                  className="w-full bg-modern-primary text-white py-3 font-bold text-sm hover:bg-modern-primary/90 transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-modern-text text-white py-4 font-bold text-sm uppercase tracking-widest hover:bg-black transition-all flex items-center justify-center gap-2"
                 >
-                  <Save size={18} /> Salvar Configuração
+                  <CheckCircle2 size={18} /> Pronto
                 </button>
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
+
       {/* Add Sale Modal */}
       <AnimatePresence>
         {showAddSaleModal && (

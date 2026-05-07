@@ -46,6 +46,15 @@ export interface ManualSale {
   timestamp: number;
 }
 
+export interface WorkspaceInvite {
+  id: string;
+  ownerEmail: string;
+  ownerUid: string;
+  inviteeEmail: string;
+  status: 'pending' | 'accepted';
+  createdAt: string;
+}
+
 export interface Client {
   email: string;
   nome: string;

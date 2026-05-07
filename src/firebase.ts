@@ -9,6 +9,7 @@ import {
   onSnapshot, 
   query, 
   orderBy,
+  where,
   getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -31,7 +32,8 @@ export {
   deleteDoc, 
   onSnapshot, 
   query, 
-  orderBy 
+  orderBy,
+  where
 };
 export type { User };
 
