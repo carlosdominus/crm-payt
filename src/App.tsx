@@ -73,11 +73,13 @@ import {
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1DhS7ewyAV6lBR6fag_OwzP4G_WrSUhncq42cROLU_X0/export?format=csv";
 
 const MANUAL_PRODUCTS = [
+  { name: "Vpower - 1 Pote", fixedCommission: 46.54 },
+  { name: "Vpower - 3 Potes", fixedCommission: 94.05 },
+  { name: "Vpower - 6 Potes", fixedCommission: 141.55 },
   { name: "Protocolo Força Natural", type: 'front', commissionRate: 0.5 },
   { name: "Diagnóstico Personalizado", type: 'upsell', commissionRate: 0.5 },
   { name: "Bônus Especial", type: 'upsell', commissionRate: 0.5 },
   { name: "Tônico do Cavalo", type: 'upsell', commissionRate: 0.5 },
-  { name: "Nutra Libid Turbo Caps", type: 'nutra', commissionRate: 0.23401 },
 ];
 
 const PAYMENT_METHODS: Record<string, string> = {
@@ -291,10 +293,12 @@ export default function App() {
   }, [authReady, user]);
 
   const [showAddSaleModal, setShowAddSaleModal] = useState(false);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [saleForm, setSaleForm] = useState({
     productIndex: 0,
     value: "",
-    date: format(new Date(), 'yyyy-MM-dd')
+    date: format(new Date(), 'yyyy-MM-dd'),
+    time: format(new Date(), 'HH:mm')
   });
 
   // Filter states
@@ -548,26 +552,35 @@ export default function App() {
     const value = parseFloat(saleForm.value.replace(',', '.'));
     const commission = product.fixedCommission !== undefined ? product.fixedCommission : value * (product.commissionRate || 0);
     
-    const saleId = Math.random().toString(36).substr(2, 9);
+    const saleId = editingSaleId || Math.random().toString(36).substr(2, 9);
+    
+    // Create timestamp combining date and time
+    const dateTimeStr = `${saleForm.date}T${saleForm.time}:00`;
+    const timestamp = new Date(dateTimeStr).getTime();
+
     const newSale: ManualSale = {
       id: saleId,
       clientKey: selectedClient.key,
       productName: product.name,
       value,
       commission,
-      date: saleForm.date,
-      timestamp: new Date(saleForm.date).getTime()
+      date: saleForm.date, // keeping for backward compatibility
+      timestamp: isNaN(timestamp) ? Date.now() : timestamp
     };
 
     if (!user) {
-      const updatedSales = [newSale, ...manualSales];
+      const updatedSales = editingSaleId 
+        ? manualSales.map(s => s.id === editingSaleId ? newSale : s)
+        : [newSale, ...manualSales];
       setManualSales(updatedSales);
       localStorage.setItem('crm_manual_sales', JSON.stringify(updatedSales));
       setShowAddSaleModal(false);
+      setEditingSaleId(null);
       setSaleForm({
         productIndex: 0,
         value: "",
-        date: format(new Date(), 'yyyy-MM-dd')
+        date: format(new Date(), 'yyyy-MM-dd'),
+        time: format(new Date(), 'HH:mm')
       });
       toggleTag(newSale.clientKey, 'vendido');
       return;
@@ -580,10 +593,12 @@ export default function App() {
     }
 
     setShowAddSaleModal(false);
+    setEditingSaleId(null);
     setSaleForm({
       productIndex: 0,
       value: "",
-      date: format(new Date(), 'yyyy-MM-dd')
+      date: format(new Date(), 'yyyy-MM-dd'),
+      time: format(new Date(), 'HH:mm')
     });
     
     // Sync sale to Google Sheets if webhook is configured
@@ -595,7 +610,7 @@ export default function App() {
           mode: 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type: 'sale_added',
+            type: editingSaleId ? 'sale_updated' : 'sale_added',
             sale: newSale,
             clientKey: newSale.clientKey,
             nome: client?.nome || '',
@@ -611,6 +626,30 @@ export default function App() {
 
     // Also update the tag to 'vendido'
     toggleTag(newSale.clientKey, 'vendido');
+  };
+
+  const handleEditSale = (sale: ManualSale) => {
+    const client = enrichedClients.find(c => c.key === sale.clientKey);
+    if (!client) return;
+    
+    setSelectedClient(client);
+    setEditingSaleId(sale.id);
+    
+    // Find product index
+    const pIndex = MANUAL_PRODUCTS.findIndex(p => p.name === sale.productName);
+    
+    // Attempt to extract time from timestamp if it's reasonably new
+    const dateObj = new Date(sale.timestamp);
+    const timeStr = format(dateObj, 'HH:mm');
+    const dateStr = format(dateObj, 'yyyy-MM-dd');
+
+    setSaleForm({
+      productIndex: pIndex !== -1 ? pIndex : 0,
+      value: sale.value.toString().replace('.', ','),
+      date: dateStr,
+      time: timeStr
+    });
+    setShowAddSaleModal(true);
   };
 
   const handleDeleteSale = async (saleId: string) => {
@@ -1093,8 +1132,45 @@ export default function App() {
       });
     }
 
-    return { distributionData, salesData };
-  }, [enrichedClients, whatsappAccounts, clientTags, clientExtraData]);
+    // Peak Hour logic
+    const hourlyDistribution = Array.from({ length: 24 }, (_, i) => ({ 
+      hour: i, 
+      label: `${i}h`, 
+      count: 0, 
+      value: 0 
+    }));
+
+    // Day of week logic (0=Domingo, 1=Segunda...)
+    const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const dailyDistribution = dayLabels.map(label => ({
+      day: label,
+      count: 0,
+      value: 0
+    }));
+
+    manualSales.forEach(sale => {
+      // Historical data might not have a precise timestamp, fallback to date
+      const saleDate = sale.timestamp ? new Date(sale.timestamp) : new Date(sale.date + 'T12:00:00');
+      if (isNaN(saleDate.getTime())) return;
+
+      // Hourly
+      const hour = saleDate.getHours();
+      hourlyDistribution[hour].count += 1;
+      hourlyDistribution[hour].value += sale.value;
+
+      // Daily
+      const dayIndex = saleDate.getDay();
+      dailyDistribution[dayIndex].count += 1;
+      dailyDistribution[dayIndex].value += sale.value;
+    });
+
+    return { 
+      distributionData, 
+      salesData, 
+      hourlyDistribution,
+      dailyDistribution
+    };
+  }, [enrichedClients, whatsappAccounts, manualSales, clientTags, clientExtraData]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -1804,6 +1880,87 @@ export default function App() {
             </div>
           </div>
 
+          {/* Hourly and Daily Analytics Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            <div className="bg-white border border-modern-border p-10 shadow-sm">
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-modern-text mb-10 flex items-center gap-2">
+                <Clock size={14} className="text-emerald-600" />
+                Vendas por Horário (Pico)
+              </h3>
+              <div className="h-[300px] w-full">
+                {manualSales.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={whatsappStats.hourlyDistribution}>
+                      <defs>
+                        <linearGradient id="colorHour" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="label" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} 
+                      />
+                      <YAxis 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} 
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '0px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value: number) => [value, 'Vendas']}
+                      />
+                      <Area type="monotone" dataKey="count" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorHour)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-center">
+                    <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-widest">Sem vendas registradas para análise horária</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white border border-modern-border p-10 shadow-sm">
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-modern-text mb-10 flex items-center gap-2">
+                <Calendar size={14} className="text-blue-600" />
+                Vendas por Dia da Semana
+              </h3>
+              <div className="h-[300px] w-full">
+                {manualSales.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={whatsappStats.dailyDistribution}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="day" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} 
+                      />
+                      <YAxis 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} 
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '0px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Faturamento']}
+                      />
+                      <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-center">
+                    <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-widest">Sem vendas registradas para análise diária</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Monthly Commission Table */}
           <div className="bg-white border border-modern-border p-10 shadow-sm">
             <div className="flex items-center justify-between mb-10">
@@ -1893,7 +2050,10 @@ export default function App() {
                     <th className="py-5 text-[11px] font-extrabold text-modern-secondary uppercase tracking-widest bg-white sticky left-[420px] z-40 border-b border-modern-border whitespace-nowrap px-4 shadow-[2px_0_0_0_rgba(0,0,0,0.05)] top-0 w-[180px] min-w-[180px]">Cliente</th>
                     
                     {!showUtms ? (
-                      <th className="px-8 py-5 text-[11px] font-extrabold text-modern-secondary uppercase tracking-widest text-right border-b border-modern-border bg-white sticky top-0 z-30">Comissão</th>
+                      <>
+                        <th className="px-8 py-5 text-[11px] font-extrabold text-modern-secondary uppercase tracking-widest text-right border-b border-modern-border bg-white sticky top-0 z-30">Comissão</th>
+                        <th className="px-4 py-5 border-b border-modern-border bg-white sticky top-0 z-30 w-[80px]"></th>
+                      </>
                     ) : (
                       <>
                         <th className="px-6 py-5 text-[10px] font-extrabold text-modern-secondary uppercase tracking-tighter whitespace-nowrap border-b border-modern-border bg-white sticky top-0 z-30">Src</th>
@@ -1930,9 +2090,29 @@ export default function App() {
                         </td>
                         
                         {!showUtms ? (
-                          <td className="px-8 py-5 text-sm font-extrabold text-emerald-600 text-right whitespace-nowrap border-b border-modern-border">
-                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.commission)}
-                          </td>
+                          <>
+                            <td className="px-8 py-5 text-sm font-extrabold text-emerald-600 text-right whitespace-nowrap border-b border-modern-border">
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.commission)}
+                            </td>
+                            <td className="px-4 py-5 whitespace-nowrap border-b border-modern-border text-right">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={() => handleEditSale(sale)}
+                                  className="p-2 text-modern-secondary hover:text-emerald-600 transition-colors"
+                                  title="Editar"
+                                >
+                                  <Edit size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSale(sale.id)}
+                                  className="p-2 text-rose-400 hover:text-rose-600 transition-colors"
+                                  title="Excluir"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </>
                         ) : (
                           <>
                             <td className="px-6 py-5 text-[10px] font-medium text-modern-secondary whitespace-nowrap border-b border-modern-border">{lastLead?.src || '-'}</td>
@@ -2074,22 +2254,31 @@ export default function App() {
                                 })()}
                               </p>
                             </div>
-                            <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-2">
                               <div className="text-right">
                                 <p className="text-sm font-extrabold text-emerald-600">
                                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.value)}
                                 </p>
                                 <p className="text-[9px] font-bold text-modern-secondary uppercase">
-                                  Comissão: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.commission)}
+                                  {format(new Date(sale.timestamp), 'HH:mm')} • {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.commission)}
                                 </p>
                               </div>
-                              <button 
-                                onClick={() => handleDeleteSale(sale.id)}
-                                className="opacity-0 group-hover/sale:opacity-100 p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
-                                title="Excluir Venda"
-                              >
-                                <Trash2 size={16} />
-                              </button>
+                              <div className="flex flex-col opacity-0 group-hover/sale:opacity-100 transition-all">
+                                <button 
+                                  onClick={() => handleEditSale(sale)}
+                                  className="p-1.5 text-modern-secondary hover:text-emerald-600 hover:bg-emerald-50 transition-all"
+                                  title="Editar Venda"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSale(sale.id)}
+                                  className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                                  title="Excluir Venda"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))
@@ -2343,7 +2532,9 @@ export default function App() {
                     <DollarSign size={20} />
                   </div>
                   <div>
-                    <h3 className="text-sm font-extrabold text-modern-text uppercase tracking-widest">Registrar Venda</h3>
+                    <h3 className="text-sm font-extrabold text-modern-text uppercase tracking-widest">
+                      {editingSaleId ? "Editar Venda" : "Registrar Venda"}
+                    </h3>
                     <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-wider">{selectedClient?.nome}</p>
                   </div>
                 </div>
@@ -2377,14 +2568,25 @@ export default function App() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Data da Venda</label>
-                  <input 
-                    type="date" 
-                    value={saleForm.date}
-                    onChange={(e) => setSaleForm({ ...saleForm, date: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Data da Venda</label>
+                    <input 
+                      type="date" 
+                      value={saleForm.date}
+                      onChange={(e) => setSaleForm({ ...saleForm, date: e.target.value })}
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Horário</label>
+                    <input 
+                      type="time" 
+                      value={saleForm.time}
+                      onChange={(e) => setSaleForm({ ...saleForm, time: e.target.value })}
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    />
+                  </div>
                 </div>
 
                 <div className="pt-4">
@@ -2403,13 +2605,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  <button 
-                    onClick={handleAddSale}
-                    disabled={!saleForm.value}
-                    className="w-full bg-emerald-600 text-white py-4 font-bold text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <CheckCircle2 size={18} /> Confirmar Venda
-                  </button>
+                    <button 
+                      onClick={handleAddSale}
+                      disabled={!saleForm.value}
+                      className="w-full bg-emerald-600 text-white py-4 font-bold text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <CheckCircle2 size={18} /> {editingSaleId ? "Salvar Alterações" : "Confirmar Venda"}
+                    </button>
                 </div>
               </div>
             </motion.div>
