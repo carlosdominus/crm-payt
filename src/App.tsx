@@ -21,6 +21,7 @@ import {
   Phone,
   Edit,
   Mail,
+  Key,
   LayoutDashboard,
   Plus,
   TrendingUp,
@@ -46,12 +47,13 @@ import {
   query, 
   orderBy,
   where,
+  getDocFromServer,
   User,
   handleFirestoreError,
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -194,10 +196,21 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [effectiveWorkspaceId, setEffectiveWorkspaceId] = useState<string | null>(null);
   const [effectiveOwnerEmail, setEffectiveOwnerEmail] = useState<string | null>(null);
+  
+  // Method 1: Email Invites (legacy/fallback)
   const [myInvites, setMyInvites] = useState<WorkspaceInvite[]>([]);
   const [mySentInvites, setMySentInvites] = useState<WorkspaceInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
+
+  // Method 3: Access Keys (Option 3)
+  const [myOwnWorkspaceKey, setMyOwnWorkspaceKey] = useState<string | null>(null);
+  const [activePartnerKey, setActivePartnerKey] = useState<string | null>(() => localStorage.getItem('crm_partner_key'));
+  const [partnerWorkspaceData, setPartnerWorkspaceData] = useState<WorkspaceKey | null>(null);
+  const [accessKeyInput, setAccessKeyInput] = useState("");
+  const [isGeneratingKey, setIsGeneratingKey] = useState(false);
+  const [isLinkingKey, setIsLinkingKey] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -211,6 +224,61 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Sync my own workspace key from Firestore
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, 'workspaceConfig', user.uid), (snap) => {
+      if (snap.exists()) {
+        setMyOwnWorkspaceKey(snap.data().key);
+      }
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Sync active partner workspace data if a key is present
+  useEffect(() => {
+    if (!activePartnerKey) {
+      setPartnerWorkspaceData(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, 'workspaceKeys', activePartnerKey), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as WorkspaceKey;
+        setPartnerWorkspaceData(data);
+      } else {
+        // Key might be deleted
+        setPartnerWorkspaceData(null);
+        setActivePartnerKey(null);
+        localStorage.removeItem('crm_partner_key');
+      }
+    });
+    return () => unsub();
+  }, [activePartnerKey]);
+
+  // Determine Effective Workspace
+  useEffect(() => {
+    if (!user) return;
+
+    if (partnerWorkspaceData) {
+      setEffectiveWorkspaceId(partnerWorkspaceData.ownerUid);
+      setEffectiveOwnerEmail(partnerWorkspaceData.ownerEmail);
+      setAuthReady(true);
+      return;
+    }
+
+    // Fallback to legacy email invites if no active key
+    const activeInvite = myInvites.find(i => i.status === 'accepted' || i.inviteeEmail === user.email);
+    if (activeInvite) {
+      setEffectiveWorkspaceId(activeInvite.ownerUid);
+      setEffectiveOwnerEmail(activeInvite.ownerEmail);
+    } else {
+      setEffectiveWorkspaceId(user.uid);
+      setEffectiveOwnerEmail(user.email);
+    }
+    setAuthReady(true);
+  }, [user, partnerWorkspaceData, myInvites]);
+
   // Listen for invites received by the logged-in user
   useEffect(() => {
     if (!user) return;
@@ -219,27 +287,70 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const invites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite));
       setMyInvites(invites);
-
-      // determine workspace: if invited by someone, use their UID
-      // For simplicity, we use the first valid invite found
-      const activeInvite = invites.find(i => i.status === 'accepted' || i.inviteeEmail === user.email);
-      if (activeInvite) {
-        setEffectiveWorkspaceId(activeInvite.ownerUid);
-        setEffectiveOwnerEmail(activeInvite.ownerEmail);
-      } else {
-        setEffectiveWorkspaceId(user.uid);
-        setEffectiveOwnerEmail(user.email);
-      }
-      setAuthReady(true);
     }, (error) => {
       console.error("Erro ao buscar convites:", error);
-      setEffectiveWorkspaceId(user.uid);
-      setEffectiveOwnerEmail(user.email);
-      setAuthReady(true);
     });
 
     return () => unsubscribe();
   }, [user]);
+
+  // Functions for Access Keys (Option 3)
+  const generateWorkspaceKey = async () => {
+    if (!user) return;
+    setIsGeneratingKey(true);
+    try {
+      const newKey = `DOM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const payload: WorkspaceKey = {
+        key: newKey,
+        ownerUid: user.uid,
+        ownerEmail: user.email,
+        createdAt: new Date().toISOString()
+      };
+      
+      await setDoc(doc(db, 'workspaceKeys', newKey), payload);
+      await setDoc(doc(db, 'workspaceConfig', user.uid), { key: newKey });
+      setMyOwnWorkspaceKey(newKey);
+    } catch (e) {
+      console.error("Erro ao gerar chave:", e);
+    } finally {
+      setIsGeneratingKey(false);
+    }
+  };
+
+  const redeemAccessKey = async () => {
+    if (!accessKeyInput) return;
+    setIsLinkingKey(true);
+    setKeyError(null);
+    try {
+      const key = accessKeyInput.trim().toUpperCase();
+      const snap = await getDocFromServer(doc(db, 'workspaceKeys', key));
+      
+      if (snap.exists()) {
+        const data = snap.data() as WorkspaceKey;
+        if (data.ownerUid === user?.uid) {
+          setKeyError("Você não pode conectar na sua própria chave.");
+          return;
+        }
+        setActivePartnerKey(key);
+        localStorage.setItem('crm_partner_key', key);
+        setAccessKeyInput("");
+        setPartnerWorkspaceData(data);
+      } else {
+        setKeyError("Chave de acesso inválida ou expirada.");
+      }
+    } catch (e) {
+      console.error("Erro ao resgatar chave:", e);
+      setKeyError("Erro ao verificar chave. Tente novamente.");
+    } finally {
+      setIsLinkingKey(false);
+    }
+  };
+
+  const disconnectWorkspace = () => {
+    setActivePartnerKey(null);
+    localStorage.removeItem('crm_partner_key');
+    setPartnerWorkspaceData(null);
+  };
 
   // Listen for invites SENT by the logged-in user
   useEffect(() => {
@@ -2478,7 +2589,7 @@ export default function App() {
                     activeSettingsTab === 'partners' ? "border-b-2 border-modern-primary text-modern-primary bg-slate-50" : "text-modern-secondary hover:bg-slate-50"
                   )}
                 >
-                  Sócios & Gestores
+                  Convidar Sócios
                 </button>
               </div>
 
@@ -2548,79 +2659,93 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="p-4 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[10px] leading-relaxed uppercase font-bold">
-                      <p className="mb-2 flex items-center gap-2"><Users size={14}/> Compartilhamento de Acesso:</p>
-                      <p className="normal-case font-medium">Os e-mails convidados terão acesso total ao seu CRM, Dashboard e Tags. Perfeito para sócios e gestores de tráfego.</p>
+                  <div className="space-y-8">
+                    <div className="p-5 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[10px] leading-relaxed uppercase font-bold">
+                      <p className="mb-2 flex items-center gap-2 text-xs"><Key size={14}/> Método 3: Chave de Acesso:</p>
+                      <p className="normal-case font-medium opacity-80">Gere uma chave e mande para seu sócio. Ele coloca essa chave no CRM dele e vocês passam a ver a mesma conta.</p>
                     </div>
 
                     {!user ? (
                       <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border">
-                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para gerenciar sócios</p>
+                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para usar chaves de acesso</p>
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Convidar por E-mail</label>
-                            <div className="flex gap-2">
-                              <input 
-                                type="email" 
-                                value={inviteEmail}
-                                onChange={(e) => setInviteEmail(e.target.value)}
-                                placeholder="E-mail do seu sócio"
-                                className="flex-1 px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none"
-                              />
+                        {/* SECTION: MY KEY */}
+                        <div className="space-y-4 pt-2">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary border-b border-modern-border pb-2 block">Minha Chave de Workspace</label>
+                          {myOwnWorkspaceKey ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-slate-50 border border-modern-border px-4 py-3 font-mono text-lg font-bold text-modern-text flex items-center justify-center tracking-widest">
+                                {myOwnWorkspaceKey}
+                              </div>
                               <button 
-                                onClick={sendInvite}
-                                disabled={isInviting || !inviteEmail}
-                                className="bg-modern-primary text-white px-6 py-3 font-bold text-xs uppercase tracking-widest hover:bg-modern-primary/90 disabled:opacity-50 transition-all flex items-center gap-2"
+                                onClick={() => copyToClipboard(myOwnWorkspaceKey)}
+                                className="p-4 bg-modern-text text-white hover:bg-black transition-all"
+                                title="Copiar Chave"
                               >
-                                {isInviting ? "..." : <Plus size={16} />} 
-                                Convidar
+                                <Copy size={18} />
                               </button>
                             </div>
-                          </div>
+                          ) : (
+                            <button 
+                              onClick={generateWorkspaceKey}
+                              disabled={isGeneratingKey}
+                              className="w-full py-4 border-2 border-dashed border-emerald-300 text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:bg-emerald-50 transition-all flex items-center justify-center gap-3"
+                            >
+                              {isGeneratingKey ? "Gerando..." : <><Plus size={16} /> Gerar Minha Chave Única</>}
+                            </button>
+                          )}
+                          <p className="text-[10px] text-modern-secondary italic">Passe esse código para quem você quer dar acesso total aos seus dados.</p>
                         </div>
 
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block border-b border-modern-border pb-2">Acessos Autorizados</label>
-                          {mySentInvites.length === 0 ? (
-                            <p className="text-[10px] text-modern-secondary italic py-4">Nenhum sócio convidado ainda.</p>
-                          ) : (
-                            mySentInvites.map((invite) => (
-                              <div key={invite.id} className="flex items-center justify-between p-3 bg-slate-50 border border-modern-border group">
+                        {/* SECTION: ACCESS OTHER */}
+                        <div className="space-y-4 pt-6 border-t border-modern-border">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary border-b border-modern-border pb-2 block">Acessar CRM de Sócio</label>
+                          
+                          {partnerWorkspaceData ? (
+                            <div className="p-5 bg-blue-50 border border-blue-200">
+                              <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-white border border-modern-border flex items-center justify-center text-modern-secondary">
-                                    <Mail size={14} />
+                                  <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white">
+                                    <Users size={14} />
                                   </div>
-                                  <p className="text-xs font-bold text-modern-text">{invite.inviteeEmail}</p>
+                                  <div>
+                                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Conectado ao Tracker de:</p>
+                                    <p className="text-xs font-bold text-modern-text">{partnerWorkspaceData.ownerEmail}</p>
+                                  </div>
                                 </div>
                                 <button 
-                                  onClick={() => removeInvite(invite.id)}
-                                  className="text-rose-400 p-2 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition-all"
-                                  title="Remover Acesso"
+                                  onClick={disconnectWorkspace}
+                                  className="text-[10px] font-black text-rose-500 uppercase hover:underline"
                                 >
-                                  <Trash2 size={16} />
+                                  Desconectar
                                 </button>
                               </div>
-                            ))
+                              <p className="text-[9px] text-blue-700 font-medium">Você está visualizando os dados deste sócio agora.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex gap-2">
+                                <input 
+                                  type="text" 
+                                  value={accessKeyInput}
+                                  onChange={(e) => setAccessKeyInput(e.target.value.toUpperCase())}
+                                  placeholder="COLE A CHAVE DO SEU SÓCIO AQUI"
+                                  className="flex-1 px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-bold focus:outline-none tracking-widest"
+                                />
+                                <button 
+                                  onClick={redeemAccessKey}
+                                  disabled={isLinkingKey || !accessKeyInput}
+                                  className="bg-modern-primary text-white px-6 py-3 font-bold text-xs uppercase tracking-widest hover:bg-modern-primary/90 disabled:opacity-50 transition-all flex items-center gap-2"
+                                >
+                                  {isLinkingKey ? "..." : "Conectar"}
+                                </button>
+                              </div>
+                              {keyError && <p className="text-[10px] font-bold text-rose-500 uppercase tracking-tighter">{keyError}</p>}
+                            </div>
                           )}
                         </div>
-
-                        {myInvites.length > 0 && (
-                          <div className="space-y-3 pt-6 border-t border-modern-border">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Workspaces que você acessa</label>
-                            {myInvites.map((invite) => (
-                              <div key={invite.id} className="p-3 bg-emerald-50 border border-emerald-200 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <CheckCircle2 size={14} className="text-emerald-500" />
-                                  <p className="text-[10px] font-bold text-emerald-800 uppercase italic">Dados de: {invite.ownerEmail}</p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </>
                     )}
                   </div>

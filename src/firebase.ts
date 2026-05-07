@@ -33,7 +33,8 @@ export {
   onSnapshot, 
   query, 
   orderBy,
-  where
+  where,
+  getDocFromServer
 };
 export type { User };
 
