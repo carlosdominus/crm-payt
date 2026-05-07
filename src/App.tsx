@@ -194,10 +194,13 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [effectiveWorkspaceId, setEffectiveWorkspaceId] = useState<string | null>(null);
   const [effectiveOwnerEmail, setEffectiveOwnerEmail] = useState<string | null>(null);
-  const [myInvites, setMyInvites] = useState<WorkspaceInvite[]>([]);
-  const [mySentInvites, setMySentInvites] = useState<WorkspaceInvite[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [isInviting, setIsInviting] = useState(false);
+  
+  // Workspace Sharing State
+  const [myWorkspaceCode, setMyWorkspaceCode] = useState<string | null>(null);
+  const [activeLink, setActiveLink] = useState<WorkspaceLink | null>(null);
+  const [workspaceInputCode, setWorkspaceInputCode] = useState("");
+  const [isLinking, setIsLinking] = useState(false);
+  const [partners, setPartners] = useState<WorkspaceLink[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -211,72 +214,112 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Listen for invites received by the logged-in user
+  // 1. Fetch/Generate my own Workspace Code
   useEffect(() => {
     if (!user) return;
-
-    const q = query(collection(db, 'invites'), where('inviteeEmail', '==', user.email));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const invites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite));
-      setMyInvites(invites);
-
-      // determine workspace: if invited by someone, use their UID
-      // For simplicity, we use the first valid invite found
-      const activeInvite = invites.find(i => i.status === 'accepted' || i.inviteeEmail === user.email);
-      if (activeInvite) {
-        setEffectiveWorkspaceId(activeInvite.ownerUid);
-        setEffectiveOwnerEmail(activeInvite.ownerEmail);
+    const q = query(collection(db, 'workspace_codes'), where('ownerUid', '==', user.uid));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Generate new code if doesn't exist
+        const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        await setDoc(doc(db, 'workspace_codes', user.uid), {
+          code: newCode,
+          ownerUid: user.uid,
+          ownerEmail: user.email,
+          createdAt: new Date().toISOString()
+        });
       } else {
+        setMyWorkspaceCode(snapshot.docs[0].data().code);
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // 2. Fetch if I am a guest of someone (WorkspaceLink)
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'workspace_links'), where('guestUid', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const link = snapshot.docs[0].data() as WorkspaceLink;
+        setActiveLink(link);
+        setEffectiveWorkspaceId(link.ownerUid);
+        setEffectiveOwnerEmail(link.ownerEmail);
+      } else {
+        setActiveLink(null);
         setEffectiveWorkspaceId(user.uid);
         setEffectiveOwnerEmail(user.email);
       }
       setAuthReady(true);
     }, (error) => {
-      console.error("Erro ao buscar convites:", error);
+      handleFirestoreError(error, OperationType.LIST, 'workspace_links');
       setEffectiveWorkspaceId(user.uid);
       setEffectiveOwnerEmail(user.email);
       setAuthReady(true);
     });
-
     return () => unsubscribe();
   }, [user]);
 
-  // Listen for invites SENT by the logged-in user
+  // 3. Fetch partners (guests) who have linked to MY workspace
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'invites'), where('ownerUid', '==', user.uid));
+    const q = query(collection(db, 'workspace_links'), where('ownerUid', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMySentInvites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite)));
+      setPartners(snapshot.docs.map(doc => doc.data() as WorkspaceLink));
     });
     return () => unsubscribe();
   }, [user]);
 
-  const sendInvite = async () => {
-    if (!user || !inviteEmail) return;
-    setIsInviting(true);
-    const inviteId = Math.random().toString(36).substring(2, 15);
+  const joinWorkspace = async () => {
+    if (!user || !workspaceInputCode) return;
+    setIsLinking(true);
     try {
-      await setDoc(doc(db, 'invites', inviteId), {
-        id: inviteId,
-        ownerEmail: user.email,
-        ownerUid: user.uid,
-        inviteeEmail: inviteEmail.toLowerCase().trim(),
-        status: 'accepted', // Auto-accepted for now to simplify
-        createdAt: new Date().toISOString()
+      const q = query(collection(db, 'workspace_codes'), where('code', '==', workspaceInputCode.toUpperCase().trim()));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        alert("Código inválido. Verifique se o código está correto.");
+        return;
+      }
+
+      const workspace = snapshot.docs[0].data() as WorkspaceCode;
+      
+      if (workspace.ownerUid === user.uid) {
+        alert("Você não pode se conectar ao seu próprio workspace.");
+        return;
+      }
+
+      await setDoc(doc(db, 'workspace_links', user.uid), {
+        guestUid: user.uid,
+        guestEmail: user.email,
+        ownerUid: workspace.ownerUid,
+        ownerEmail: workspace.ownerEmail,
+        linkedAt: new Date().toISOString()
       });
-      setInviteEmail("");
+      
+      setWorkspaceInputCode("");
     } catch (e) {
-      console.error("Erro ao enviar convite:", e);
+      console.error("Erro ao vincular workspace:", e);
+      alert("Erro ao vincular workspace.");
     } finally {
-      setIsInviting(false);
+      setIsLinking(false);
     }
   };
 
-  const removeInvite = async (id: string) => {
+  const leaveWorkspace = async () => {
+    if (!user) return;
     try {
-      await deleteDoc(doc(db, 'invites', id));
+      await deleteDoc(doc(db, 'workspace_links', user.uid));
     } catch (e) {
-      console.error("Erro ao remover convite:", e);
+      console.error("Erro ao sair do workspace:", e);
+    }
+  };
+
+  const removePartner = async (guestUid: string) => {
+    try {
+      await deleteDoc(doc(db, 'workspace_links', guestUid));
+    } catch (e) {
+      console.error("Erro ao remover parceiro:", e);
     }
   };
 
@@ -2550,75 +2593,112 @@ export default function App() {
                 ) : (
                   <div className="space-y-6">
                     <div className="p-4 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[10px] leading-relaxed uppercase font-bold">
-                      <p className="mb-2 flex items-center gap-2"><Users size={14}/> Compartilhamento de Acesso:</p>
-                      <p className="normal-case font-medium">Os e-mails convidados terão acesso total ao seu CRM, Dashboard e Tags. Perfeito para sócios e gestores de tráfego.</p>
+                      <p className="mb-2 flex items-center gap-2"><Users size={14}/> Compartilhamento por Código:</p>
+                      <p className="normal-case font-medium">1. Seu sócio/gestor deve fazer login com Google aqui.<br/>2. Ele cola o seu <b>Código de Acesso</b> e pronto.</p>
                     </div>
 
                     {!user ? (
                       <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border">
-                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para gerenciar sócios</p>
+                        <Users size={24} className="mx-auto mb-4 text-modern-secondary opacity-20" />
+                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para ver seu código</p>
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Convidar por E-mail</label>
-                            <div className="flex gap-2">
-                              <input 
-                                type="email" 
-                                value={inviteEmail}
-                                onChange={(e) => setInviteEmail(e.target.value)}
-                                placeholder="E-mail do seu sócio"
-                                className="flex-1 px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none"
-                              />
+                        {/* If I am NOT a guest, show my code */}
+                        {!activeLink && (
+                          <div className="p-6 bg-slate-900 text-white border border-modern-border mb-8 shadow-xl">
+                            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-modern-primary mb-2">Seu Código de Acesso</p>
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-3xl font-black tracking-widest font-mono text-white">{myWorkspaceCode || '...'}</h4>
                               <button 
-                                onClick={sendInvite}
-                                disabled={isInviting || !inviteEmail}
-                                className="bg-modern-primary text-white px-6 py-3 font-bold text-xs uppercase tracking-widest hover:bg-modern-primary/90 disabled:opacity-50 transition-all flex items-center gap-2"
+                                onClick={() => myWorkspaceCode && copyToClipboard(myWorkspaceCode)}
+                                className="bg-white/10 p-3 hover:bg-white/20 transition-all text-modern-primary"
+                                title="Copiar Código"
                               >
-                                {isInviting ? "..." : <Plus size={16} />} 
-                                Convidar
+                                {copied ? <CheckCircle2 size={20} /> : <Copy size={20} />}
                               </button>
                             </div>
+                            <p className="text-[10px] text-white/40 mt-4 leading-normal italic">Envie este código para o seu sócio ou gestor para que eles vejam seus dados.</p>
                           </div>
-                        </div>
+                        )}
 
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block border-b border-modern-border pb-2">Acessos Autorizados</label>
-                          {mySentInvites.length === 0 ? (
-                            <p className="text-[10px] text-modern-secondary italic py-4">Nenhum sócio convidado ainda.</p>
-                          ) : (
-                            mySentInvites.map((invite) => (
-                              <div key={invite.id} className="flex items-center justify-between p-3 bg-slate-50 border border-modern-border group">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-white border border-modern-border flex items-center justify-center text-modern-secondary">
-                                    <Mail size={14} />
+                        {/* Join Workspace / Connection Status */}
+                        <div className="space-y-4">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block border-b border-modern-border pb-2">Status da Conexão</label>
+                          
+                          {activeLink ? (
+                            <div className="p-4 bg-emerald-50 border border-emerald-200">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-emerald-600 flex items-center justify-center text-white">
+                                      <LayoutDashboard size={20} />
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] font-black uppercase text-emerald-800 tracking-tighter">Conectado ao Workspace de:</p>
+                                      <p className="text-sm font-bold text-modern-text">{activeLink.ownerEmail}</p>
+                                    </div>
                                   </div>
-                                  <p className="text-xs font-bold text-modern-text">{invite.inviteeEmail}</p>
+                                  <button 
+                                    onClick={leaveWorkspace}
+                                    className="text-rose-500 text-[10px] font-black uppercase tracking-widest hover:underline"
+                                  >
+                                    Desconectar
+                                  </button>
                                 </div>
+                                <p className="text-[9px] text-emerald-700 mt-4 leading-normal italic">Você está vendo as informações do workspace acima em tempo real.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary mb-1">Conectar a um Workspace</p>
+                              <div className="flex gap-2">
+                                <input 
+                                  type="text" 
+                                  value={workspaceInputCode}
+                                  onChange={(e) => setWorkspaceInputCode(e.target.value)}
+                                  placeholder="Cole o código do seu sócio aqui"
+                                  className="flex-1 px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-bold focus:outline-none uppercase"
+                                />
                                 <button 
-                                  onClick={() => removeInvite(invite.id)}
-                                  className="text-rose-400 p-2 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition-all"
-                                  title="Remover Acesso"
+                                  onClick={joinWorkspace}
+                                  disabled={isLinking || !workspaceInputCode}
+                                  className="bg-modern-primary text-white px-6 py-3 font-bold text-xs uppercase tracking-widest hover:bg-modern-primary/90 disabled:opacity-50 transition-all flex items-center gap-2"
                                 >
-                                  <Trash2 size={16} />
+                                  {isLinking ? "..." : <Plus size={16} />} 
+                                  Conectar
                                 </button>
                               </div>
-                            ))
+                            </div>
                           )}
                         </div>
 
-                        {myInvites.length > 0 && (
-                          <div className="space-y-3 pt-6 border-t border-modern-border">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Workspaces que você acessa</label>
-                            {myInvites.map((invite) => (
-                              <div key={invite.id} className="p-3 bg-emerald-50 border border-emerald-200 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <CheckCircle2 size={14} className="text-emerald-500" />
-                                  <p className="text-[10px] font-bold text-emerald-800 uppercase italic">Dados de: {invite.ownerEmail}</p>
+                        {/* List of partners only if I am the owner */}
+                        {!activeLink && (
+                          <div className="space-y-3 pt-8">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block border-b border-modern-border pb-2">Gestores & Sócios com Acesso</label>
+                            {partners.length === 0 ? (
+                              <p className="text-[10px] text-modern-secondary italic py-4">Ninguém conectado ao seu workspace no momento.</p>
+                            ) : (
+                              partners.map((partner) => (
+                                <div key={partner.guestUid} className="flex items-center justify-between p-3 bg-slate-50 border border-modern-border group">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-white border border-modern-border flex items-center justify-center text-modern-secondary">
+                                      <Mail size={14} />
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-modern-text leading-none mb-1">{partner.guestEmail}</p>
+                                      <p className="text-[8px] font-bold text-modern-secondary uppercase tracking-widest">Usuário Conectado</p>
+                                    </div>
+                                  </div>
+                                  <button 
+                                    onClick={() => removePartner(partner.guestUid)}
+                                    className="text-rose-400 p-2 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition-all"
+                                    title="Remover Acesso"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
                                 </div>
-                              </div>
-                            ))}
+                              ))
+                            )}
                           </div>
                         )}
                       </>

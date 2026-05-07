@@ -15,6 +15,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isWorkspaceMember(ownerId) {
+      return isOwner(ownerId) || (isSignedIn() && 
+        exists(/databases/$(database)/documents/workspace_links/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/workspace_links/$(request.auth.uid)).data.ownerUid == ownerId);
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -27,19 +33,32 @@ service cloud.firestore {
       return resource.data;
     }
 
+    // --- Workspace Management ---
+    match /workspace_codes/{ownerUid} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(ownerUid);
+    }
+
+    match /workspace_links/{guestUid} {
+      allow read: if isSignedIn() && (request.auth.uid == guestUid || resource.data.ownerUid == request.auth.uid);
+      allow create: if isOwner(guestUid);
+      allow update: if isOwner(guestUid) || (isSignedIn() && existing().ownerUid == request.auth.uid);
+      allow delete: if isOwner(guestUid) || (isSignedIn() && existing().ownerUid == request.auth.uid);
+    }
+
     // --- User Tags ---
     match /users/{userId}/tags/{clientKey} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId) 
+      allow get: if isWorkspaceMember(userId);
+      allow list: if isWorkspaceMember(userId);
+      allow create: if isWorkspaceMember(userId) 
         && isValidId(clientKey)
         && isValidUserTag(incoming())
         && incoming().clientKey == clientKey;
-      allow update: if isOwner(userId)
+      allow update: if isWorkspaceMember(userId)
         && isValidUserTag(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['tag', 'updatedAt'])
         && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
+      allow delete: if isWorkspaceMember(userId);
 
       function isValidUserTag(data) {
         return data.keys().hasAll(['clientKey', 'tag', 'updatedAt'])
@@ -52,18 +71,18 @@ service cloud.firestore {
 
     // --- Manual Sales ---
     match /users/{userId}/sales/{saleId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow get: if isWorkspaceMember(userId);
+      allow list: if isWorkspaceMember(userId);
+      allow create: if isWorkspaceMember(userId)
         && isValidId(saleId)
         && isValidManualSale(incoming())
         && incoming().id == saleId;
-      allow update: if isOwner(userId)
+      allow update: if isWorkspaceMember(userId)
         && isValidManualSale(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['productName', 'value', 'commission', 'date', 'timestamp'])
         && incoming().id == existing().id
         && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
+      allow delete: if isWorkspaceMember(userId);
 
       function isValidManualSale(data) {
         return data.keys().hasAll(['id', 'clientKey', 'productName', 'value', 'commission', 'date', 'timestamp'])
@@ -80,16 +99,16 @@ service cloud.firestore {
 
     // --- WhatsApp Accounts ---
     match /users/{userId}/whatsappAccounts/{accId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow get: if isWorkspaceMember(userId);
+      allow list: if isWorkspaceMember(userId);
+      allow create: if isWorkspaceMember(userId)
         && isValidId(accId)
         && isValidWhatsAppAccount(incoming())
         && incoming().id == accId;
-      allow update: if isOwner(userId)
+      allow update: if isWorkspaceMember(userId)
         && isValidWhatsAppAccount(incoming())
         && incoming().id == existing().id;
-      allow delete: if isOwner(userId);
+      allow delete: if isWorkspaceMember(userId);
 
       function isValidWhatsAppAccount(data) {
         return data.keys().hasAll(['id', 'name', 'phoneNumber', 'identifier', 'color', 'createdAt'])
@@ -105,13 +124,13 @@ service cloud.firestore {
 
     // --- Client Extra Data ---
     match /users/{userId}/clientData/{clientKey} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create, update: if isOwner(userId)
+      allow get: if isWorkspaceMember(userId);
+      allow list: if isWorkspaceMember(userId);
+      allow create, update: if isWorkspaceMember(userId)
         && isValidId(clientKey)
         && isValidClientData(incoming())
         && incoming().clientKey == clientKey;
-      allow delete: if isOwner(userId);
+      allow delete: if isWorkspaceMember(userId);
 
       function isValidClientData(data) {
         return data.keys().hasAll(['clientKey', 'updatedAt'])
