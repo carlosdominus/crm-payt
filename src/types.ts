@@ -59,6 +59,8 @@ export interface WorkspaceKey {
   key: string;
   ownerUid: string;
   ownerEmail: string;
+  ownerDomain?: string;
+  domainAccessEnabled?: boolean;
   createdAt: string;
 }
 

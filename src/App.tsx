@@ -203,15 +203,17 @@ export default function App() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
 
-  // Method 3: Access Keys (Option 3)
   const [myOwnWorkspaceKey, setMyOwnWorkspaceKey] = useState<string | null>(null);
+  const [domainAccessEnabled, setDomainAccessEnabled] = useState(false);
   const [activePartnerKey, setActivePartnerKey] = useState<string | null>(() => localStorage.getItem('crm_partner_key'));
+  const [domainWorkspaceData, setDomainWorkspaceData] = useState<WorkspaceKey | null>(null);
   const [partnerWorkspaceData, setPartnerWorkspaceData] = useState<WorkspaceKey | null>(null);
   const [accessKeyInput, setAccessKeyInput] = useState("");
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
   const [isLinkingKey, setIsLinkingKey] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
 
+  // 1. Auth State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -224,42 +226,37 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync my own workspace key from Firestore
+  // 2. Domain Discovery (Auto-connect teammate)
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(doc(db, 'workspaceConfig', user.uid), (snap) => {
-      if (snap.exists()) {
-        setMyOwnWorkspaceKey(snap.data().key);
-      }
-    });
-    return () => unsub();
-  }, [user]);
-
-  // Sync active partner workspace data if a key is present
-  useEffect(() => {
-    if (!activePartnerKey) {
-      setPartnerWorkspaceData(null);
+    if (!user || activePartnerKey) {
+      setDomainWorkspaceData(null);
       return;
     }
+    
+    const emailDomain = user.email?.split('@')[1];
+    if (!emailDomain || emailDomain === 'gmail.com' || emailDomain === 'outlook.com' || emailDomain === 'hotmail.com') return;
 
-    const unsub = onSnapshot(doc(db, 'workspaceKeys', activePartnerKey), (snap) => {
+    const unsub = onSnapshot(doc(db, 'domainWorkspaces', emailDomain), (snap) => {
       if (snap.exists()) {
         const data = snap.data() as WorkspaceKey;
-        setPartnerWorkspaceData(data);
+        // If it's not my own workspace, set it as domain workspace
+        if (data.ownerUid !== user.uid) {
+          setDomainWorkspaceData(data);
+        } else {
+          setDomainWorkspaceData(null);
+        }
       } else {
-        // Key might be deleted
-        setPartnerWorkspaceData(null);
-        setActivePartnerKey(null);
-        localStorage.removeItem('crm_partner_key');
+        setDomainWorkspaceData(null);
       }
     });
     return () => unsub();
-  }, [activePartnerKey]);
+  }, [user, activePartnerKey]);
 
-  // Determine Effective Workspace
+  // 3. Determine Effective Workspace
   useEffect(() => {
     if (!user) return;
 
+    // Priority 1: Manual Access Key
     if (partnerWorkspaceData) {
       setEffectiveWorkspaceId(partnerWorkspaceData.ownerUid);
       setEffectiveOwnerEmail(partnerWorkspaceData.ownerEmail);
@@ -267,7 +264,15 @@ export default function App() {
       return;
     }
 
-    // Fallback to legacy email invites if no active key
+    // Priority 2: Domain Auto-Match
+    if (domainWorkspaceData) {
+      setEffectiveWorkspaceId(domainWorkspaceData.ownerUid);
+      setEffectiveOwnerEmail(domainWorkspaceData.ownerEmail);
+      setAuthReady(true);
+      return;
+    }
+
+    // Priority 3: Legacy Invites
     const activeInvite = myInvites.find(i => i.status === 'accepted' || i.inviteeEmail === user.email);
     if (activeInvite) {
       setEffectiveWorkspaceId(activeInvite.ownerUid);
@@ -277,43 +282,62 @@ export default function App() {
       setEffectiveOwnerEmail(user.email);
     }
     setAuthReady(true);
-  }, [user, partnerWorkspaceData, myInvites]);
+  }, [user, partnerWorkspaceData, domainWorkspaceData, myInvites]);
 
-  // Listen for invites received by the logged-in user
-  useEffect(() => {
-    if (!user) return;
-
-    const q = query(collection(db, 'invites'), where('inviteeEmail', '==', user.email));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const invites = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkspaceInvite));
-      setMyInvites(invites);
-    }, (error) => {
-      console.error("Erro ao buscar convites:", error);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // Functions for Access Keys (Option 3)
+  // 4. Logic for Domain Access & Keys
   const generateWorkspaceKey = async () => {
     if (!user) return;
     setIsGeneratingKey(true);
     try {
+      const emailDomain = user.email?.split('@')[1] || "";
       const newKey = `DOM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
       const payload: WorkspaceKey = {
         key: newKey,
         ownerUid: user.uid,
-        ownerEmail: user.email,
+        ownerEmail: user.email!,
+        ownerDomain: emailDomain,
+        domainAccessEnabled: domainAccessEnabled,
         createdAt: new Date().toISOString()
       };
       
       await setDoc(doc(db, 'workspaceKeys', newKey), payload);
-      await setDoc(doc(db, 'workspaceConfig', user.uid), { key: newKey });
+      await setDoc(doc(db, 'workspaceConfig', user.uid), { 
+        key: newKey, 
+        domainAccessEnabled, 
+        ownerDomain: emailDomain 
+      }, { merge: true });
+      
       setMyOwnWorkspaceKey(newKey);
     } catch (e) {
       console.error("Erro ao gerar chave:", e);
     } finally {
       setIsGeneratingKey(false);
+    }
+  };
+
+  const toggleDomainAccess = async (enabled: boolean) => {
+    if (!user || !myOwnWorkspaceKey) return;
+    setDomainAccessEnabled(enabled);
+    const domain = user.email?.split('@')[1];
+    if (!domain) return;
+
+    try {
+      if (enabled) {
+        const payload: WorkspaceKey = {
+          key: myOwnWorkspaceKey,
+          ownerUid: user.uid,
+          ownerEmail: user.email!,
+          ownerDomain: domain,
+          domainAccessEnabled: true,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'domainWorkspaces', domain), payload);
+      } else {
+        await deleteDoc(doc(db, 'domainWorkspaces', domain));
+      }
+      await setDoc(doc(db, 'workspaceConfig', user.uid), { domainAccessEnabled: enabled }, { merge: true });
+    } catch (e) {
+      console.error("Erro ao alternar domain access:", e);
     }
   };
 
@@ -2589,7 +2613,7 @@ export default function App() {
                     activeSettingsTab === 'partners' ? "border-b-2 border-modern-primary text-modern-primary bg-slate-50" : "text-modern-secondary hover:bg-slate-50"
                   )}
                 >
-                  Convidar Sócios
+                  Sócios & Domínio
                 </button>
               </div>
 
@@ -2661,22 +2685,45 @@ export default function App() {
                 ) : (
                   <div className="space-y-8">
                     <div className="p-5 bg-emerald-50 border border-emerald-100 text-emerald-800 text-[10px] leading-relaxed uppercase font-bold">
-                      <p className="mb-2 flex items-center gap-2 text-xs"><Key size={14}/> Método 3: Chave de Acesso:</p>
-                      <p className="normal-case font-medium opacity-80">Gere uma chave e mande para seu sócio. Ele coloca essa chave no CRM dele e vocês passam a ver a mesma conta.</p>
+                      <p className="mb-2 flex items-center gap-2 text-xs"><Key size={14}/> Acesso Automático por Domínio:</p>
+                      <p className="normal-case font-medium opacity-80">Ative para que qualquer pessoa com o e-mail da sua empresa (@{user?.email?.split('@')[1]}) veja seus dados sem precisar de convite.</p>
                     </div>
 
                     {!user ? (
                       <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border">
-                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para usar chaves de acesso</p>
+                        <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-widest">Faça login para gerenciar acessos</p>
                       </div>
                     ) : (
                       <>
-                        {/* SECTION: MY KEY */}
-                        <div className="space-y-4 pt-2">
-                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary border-b border-modern-border pb-2 block">Minha Chave de Workspace</label>
+                        {/* Domain Access Toggle */}
+                        <div className="p-6 bg-slate-50 border border-modern-border flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] font-black uppercase text-modern-text tracking-widest mb-1">Liberar para Equipe @{user.email?.split('@')[1]}</p>
+                            <p className="text-[9px] font-bold text-modern-secondary uppercase opacity-70">Qualquer um do seu domínio pode acessar</p>
+                          </div>
+                          <button 
+                            onClick={() => toggleDomainAccess(!domainAccessEnabled)}
+                            className={cn(
+                              "w-12 h-6 rounded-full transition-all relative",
+                              domainAccessEnabled ? "bg-emerald-500" : "bg-slate-300"
+                            )}
+                          >
+                            <div className={cn(
+                              "absolute top-1 w-4 h-4 bg-white shadow-sm transition-all",
+                              domainAccessEnabled ? "left-7" : "left-1"
+                            )} />
+                          </button>
+                        </div>
+
+                        {/* SECTION: ACCESS KEY */}
+                        <div className="space-y-4 pt-4 border-t border-modern-border">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary flex items-center justify-between">
+                            Chave para Sócios Externos
+                            {domainAccessEnabled && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-2 py-0.5">Domínio Ativo</span>}
+                          </label>
                           {myOwnWorkspaceKey ? (
                             <div className="flex items-center gap-2">
-                              <div className="flex-1 bg-slate-50 border border-modern-border px-4 py-3 font-mono text-lg font-bold text-modern-text flex items-center justify-center tracking-widest">
+                              <div className="flex-1 bg-white border border-modern-border px-4 py-3 font-mono text-lg font-bold text-modern-text flex items-center justify-center tracking-widest">
                                 {myOwnWorkspaceKey}
                               </div>
                               <button 
@@ -2693,26 +2740,25 @@ export default function App() {
                               disabled={isGeneratingKey}
                               className="w-full py-4 border-2 border-dashed border-emerald-300 text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:bg-emerald-50 transition-all flex items-center justify-center gap-3"
                             >
-                              {isGeneratingKey ? "Gerando..." : <><Plus size={16} /> Gerar Minha Chave Única</>}
+                              {isGeneratingKey ? "Gerando..." : <><Plus size={16} /> Abrir Workspace</>}
                             </button>
                           )}
-                          <p className="text-[10px] text-modern-secondary italic">Passe esse código para quem você quer dar acesso total aos seus dados.</p>
                         </div>
 
-                        {/* SECTION: ACCESS OTHER */}
-                        <div className="space-y-4 pt-6 border-t border-modern-border">
-                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary border-b border-modern-border pb-2 block">Acessar CRM de Sócio</label>
+                        {/* CONNECTION STATUS */}
+                        <div className="space-y-4 pt-8 border-t border-modern-border">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary border-b border-modern-border pb-2 block">Status da Conexão</label>
                           
-                          {partnerWorkspaceData ? (
+                          {partnerWorkspaceData || domainWorkspaceData ? (
                             <div className="p-5 bg-blue-50 border border-blue-200">
-                              <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white">
                                     <Users size={14} />
                                   </div>
                                   <div>
-                                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Conectado ao Tracker de:</p>
-                                    <p className="text-xs font-bold text-modern-text">{partnerWorkspaceData.ownerEmail}</p>
+                                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Visualizando Dados de:</p>
+                                    <p className="text-xs font-bold text-modern-text">{(partnerWorkspaceData || domainWorkspaceData)?.ownerEmail}</p>
                                   </div>
                                 </div>
                                 <button 
@@ -2722,7 +2768,9 @@ export default function App() {
                                   Desconectar
                                 </button>
                               </div>
-                              <p className="text-[9px] text-blue-700 font-medium">Você está visualizando os dados deste sócio agora.</p>
+                              <p className="text-[9px] mt-3 text-blue-700 font-medium px-1 italic">
+                                {partnerWorkspaceData ? "Conectado via Chave Manual" : `Conectado via Domínio @${user?.email?.split('@')[1]}`}
+                              </p>
                             </div>
                           ) : (
                             <div className="space-y-3">
