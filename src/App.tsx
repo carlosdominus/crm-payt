@@ -1381,7 +1381,7 @@ export default function App() {
                       <motion.tr 
                         key={clientKey}
                         onClick={() => setSelectedClient(client)}
-                        className="group transition-colors cursor-pointer hover:bg-[#f1f3f4] relative hover:z-[60]"
+                        className="group transition-colors cursor-pointer hover:bg-[#f1f3f4] relative hover:z-[200]"
                         initial={false}
                         animate={{ opacity: 1 }}
                       >
@@ -1458,14 +1458,14 @@ export default function App() {
                               </button>
                               
                               <div className={cn(
-                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_8px_30px_rgba(0,0,0,0.2)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[150] rounded-none",
-                                idx < 4 ? "top-full mt-2" : "bottom-full mb-2"
+                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-none",
+                                idx < 10 ? "top-full mt-2" : "bottom-full mb-2"
                               )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
                                   <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest text-left">Atribuir WhatsApp</p>
                                   <Phone size={12} className="text-modern-secondary" />
                                 </div>
-                                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
                                   {client.assignedWhatsappId && (
                                     <button 
                                       onClick={(e) => {
@@ -1488,7 +1488,7 @@ export default function App() {
                                         updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
                                       }}
                                       className={cn(
-                                        "w-full text-left px-3 py-3 text-[11px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
+                                        "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
                                         client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
                                       )}
                                     >
