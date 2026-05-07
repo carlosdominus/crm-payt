@@ -226,6 +226,39 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // 1.1 Sync my own workspace key from Firestore
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, 'workspaceConfig', user.uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setMyOwnWorkspaceKey(data.key);
+        setDomainAccessEnabled(!!data.domainAccessEnabled);
+      }
+    });
+    return () => unsub();
+  }, [user]);
+
+  // 1.2 Sync active partner workspace data if a key is present
+  useEffect(() => {
+    if (!activePartnerKey) {
+      setPartnerWorkspaceData(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, 'workspaceKeys', activePartnerKey), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as WorkspaceKey;
+        setPartnerWorkspaceData(data);
+      } else {
+        setPartnerWorkspaceData(null);
+        setActivePartnerKey(null);
+        localStorage.removeItem('crm_partner_key');
+      }
+    });
+    return () => unsub();
+  }, [activePartnerKey]);
+
   // 2. Domain Discovery (Auto-connect teammate)
   useEffect(() => {
     if (!user || activePartnerKey) {
@@ -310,13 +343,58 @@ export default function App() {
       setMyOwnWorkspaceKey(newKey);
     } catch (e) {
       console.error("Erro ao gerar chave:", e);
+      handleFirestoreError(e, OperationType.WRITE, `workspaceKeys/${user.uid}`);
     } finally {
       setIsGeneratingKey(false);
     }
   };
 
   const toggleDomainAccess = async (enabled: boolean) => {
-    if (!user || !myOwnWorkspaceKey) return;
+    if (!user) return;
+    
+    let keyToUse = myOwnWorkspaceKey;
+    
+    // If enabling and no key exists, generate one first
+    if (enabled && !keyToUse) {
+      setIsGeneratingKey(true);
+      try {
+        const emailDomain = user.email?.split('@')[1] || "";
+        const newKey = `DOM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        const payload: WorkspaceKey = {
+          key: newKey,
+          ownerUid: user.uid,
+          ownerEmail: user.email!,
+          ownerDomain: emailDomain,
+          domainAccessEnabled: true, // We are enabling it now
+          createdAt: new Date().toISOString()
+        };
+        
+        await setDoc(doc(db, 'workspaceKeys', newKey), payload);
+        await setDoc(doc(db, 'workspaceConfig', user.uid), { 
+          key: newKey, 
+          domainAccessEnabled: true, 
+          ownerDomain: emailDomain 
+        }, { merge: true });
+        
+        // Also add to domainWorkspaces
+        if (emailDomain) {
+          await setDoc(doc(db, 'domainWorkspaces', emailDomain), payload);
+        }
+        
+        setMyOwnWorkspaceKey(newKey);
+        setDomainAccessEnabled(true);
+        setIsGeneratingKey(false);
+        return; // Success, already toggled
+      } catch (e) {
+        console.error("Erro ao gerar chave automática:", e);
+        handleFirestoreError(e, OperationType.WRITE, `workspaceConfig/${user.uid}`);
+        setIsGeneratingKey(false);
+        return;
+      }
+    }
+
+    if (!keyToUse) return;
+
     setDomainAccessEnabled(enabled);
     const domain = user.email?.split('@')[1];
     if (!domain) return;
@@ -324,7 +402,7 @@ export default function App() {
     try {
       if (enabled) {
         const payload: WorkspaceKey = {
-          key: myOwnWorkspaceKey,
+          key: keyToUse,
           ownerUid: user.uid,
           ownerEmail: user.email!,
           ownerDomain: domain,
@@ -336,8 +414,12 @@ export default function App() {
         await deleteDoc(doc(db, 'domainWorkspaces', domain));
       }
       await setDoc(doc(db, 'workspaceConfig', user.uid), { domainAccessEnabled: enabled }, { merge: true });
+      
+      // Sync update to the key itself too
+      await setDoc(doc(db, 'workspaceKeys', keyToUse), { domainAccessEnabled: enabled }, { merge: true });
     } catch (e) {
       console.error("Erro ao alternar domain access:", e);
+      handleFirestoreError(e, OperationType.WRITE, `domainWorkspaces/${domain}`);
     }
   };
 

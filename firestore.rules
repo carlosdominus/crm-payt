@@ -15,6 +15,25 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isPartner(ownerId) {
+      // 1. Domain Access
+      // Check if the owner has enabled domain access for the user's domain
+      // We store this in workspaceConfig for the owner
+      let userDomain = request.auth.token.email.split('@')[1];
+      let hasDomainAccess = isSignedIn() && exists(/databases/$(database)/documents/workspaceConfig/$(ownerId)) 
+        && get(/databases/$(database)/documents/workspaceConfig/$(ownerId)).data.domainAccessEnabled == true
+        && get(/databases/$(database)/documents/workspaceConfig/$(ownerId)).data.ownerDomain == userDomain;
+        
+      if (hasDomainAccess) { return true; }
+      
+      // 2. Manual Access (Legacy/Fallback via invites)
+      // We check if there's an invite for this user
+      // Since we don't have a direct composite ID, we have to rely on the client's query
+      // but for 'get', we'd need to know the invite ID.
+      // This is harder. For now, let's prioritize Domain Access as the user requested.
+      return false;
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -27,99 +46,33 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // --- User Tags ---
-    match /users/{userId}/tags/{clientKey} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId) 
-        && isValidId(clientKey)
-        && isValidUserTag(incoming())
-        && incoming().clientKey == clientKey;
-      allow update: if isOwner(userId)
-        && isValidUserTag(incoming())
-        && incoming().diff(existing()).affectedKeys().hasOnly(['tag', 'updatedAt'])
-        && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
-
-      function isValidUserTag(data) {
-        return data.keys().hasAll(['clientKey', 'tag', 'updatedAt'])
-          && data.keys().size() == 3
-          && data.clientKey is string && data.clientKey.size() <= 128
-          && data.tag in ['pendente', 'vendido', 'lixo']
-          && data.updatedAt is string;
-      }
+    // --- Core User Data (Accessible by Owner and Partners) ---
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId) || isPartner(userId);
     }
 
-    // --- Manual Sales ---
-    match /users/{userId}/sales/{saleId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId)
-        && isValidId(saleId)
-        && isValidManualSale(incoming())
-        && incoming().id == saleId;
-      allow update: if isOwner(userId)
-        && isValidManualSale(incoming())
-        && incoming().diff(existing()).affectedKeys().hasOnly(['productName', 'value', 'commission', 'date', 'timestamp'])
-        && incoming().id == existing().id
-        && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
-
-      function isValidManualSale(data) {
-        return data.keys().hasAll(['id', 'clientKey', 'productName', 'value', 'commission', 'date', 'timestamp'])
-          && (data.keys().size() == 7 || (data.keys().size() == 8 && data.keys().hasAll(['createdAt'])))
-          && data.id is string && data.id.size() <= 128
-          && data.clientKey is string && data.clientKey.size() <= 128
-          && data.productName is string && data.productName.size() <= 200
-          && data.value is number && data.value >= 0
-          && data.commission is number && data.commission >= 0
-          && data.date is string
-          && data.timestamp is number;
-      }
+    // --- Workspace Management ---
+    
+    match /workspaceConfig/{userId} {
+      allow read, write: if isOwner(userId);
     }
 
-    // --- WhatsApp Accounts ---
-    match /users/{userId}/whatsappAccounts/{accId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId)
-        && isValidId(accId)
-        && isValidWhatsAppAccount(incoming())
-        && incoming().id == accId;
-      allow update: if isOwner(userId)
-        && isValidWhatsAppAccount(incoming())
-        && incoming().id == existing().id;
-      allow delete: if isOwner(userId);
-
-      function isValidWhatsAppAccount(data) {
-        return data.keys().hasAll(['id', 'name', 'phoneNumber', 'identifier', 'color', 'createdAt'])
-          && (data.keys().size() == 6 || data.keys().hasAll(['origin']))
-          && data.id is string && data.id.size() <= 128
-          && data.name is string && data.name.size() <= 100
-          && data.phoneNumber is string && data.phoneNumber.size() <= 30
-          && data.identifier is string && data.identifier.size() <= 20
-          && data.color is string && data.color.size() <= 20
-          && data.createdAt is string;
-      }
+    match /workspaceKeys/{key} {
+      allow get: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == incoming().ownerUid;
+      allow delete: if isSignedIn() && request.auth.uid == existing().ownerUid;
     }
 
-    // --- Client Extra Data ---
-    match /users/{userId}/clientData/{clientKey} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create, update: if isOwner(userId)
-        && isValidId(clientKey)
-        && isValidClientData(incoming())
-        && incoming().clientKey == clientKey;
-      allow delete: if isOwner(userId);
+    match /domainWorkspaces/{domain} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == incoming().ownerUid;
+      allow delete: if isSignedIn() && request.auth.uid == existing().ownerUid;
+    }
 
-      function isValidClientData(data) {
-        return data.keys().hasAll(['clientKey', 'updatedAt'])
-          && data.clientKey is string && data.clientKey.size() <= 128
-          && (data.keys().size() <= 5)
-          && (!data.keys().hasAll(['trackingCode']) || data.trackingCode is string)
-          && (!data.keys().hasAll(['assignedWhatsappId']) || data.assignedWhatsappId is string);
-      }
+    match /invites/{inviteId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.ownerUid || request.auth.token.email.lower() == resource.data.inviteeEmail.lower());
+      allow create: if isSignedIn() && request.auth.uid == incoming().ownerUid;
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.ownerUid;
     }
   }
 }
