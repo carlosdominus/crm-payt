@@ -19,6 +19,7 @@ import {
   Filter,
   ChevronDown,
   Phone,
+  PhoneOff,
   Edit,
   Mail,
   Key,
@@ -161,12 +162,13 @@ export default function App() {
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
-  const [whatsappForm, setWhatsappForm] = useState({
+  const [whatsappForm, setWhatsappForm] = useState<Omit<WhatsAppAccount, 'id'>>({
     name: "",
     origin: "",
     color: "#25D366",
     phoneNumber: "",
-    identifier: ""
+    identifier: "",
+    status: 'active'
   });
 
   const getClientTag = (client: Client) => {
@@ -1106,7 +1108,8 @@ export default function App() {
             } else {
               // Deterministic key: phone OR email OR name
               // BUT we prefix it to avoid collisions between different types
-              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
+              // We prioritize email as the most stable, then phone, then name.
+              const clientKey = lead.email ? `email_${lead.email.toLowerCase().trim()}` : (lead.telefone ? `tel_${cleanPhone(lead.telefone)}` : `name_${lead.nome.toLowerCase().trim()}`);
               
               const newClient: Client = {
                 email: lead.email,
@@ -1129,11 +1132,12 @@ export default function App() {
           // Pass everything to setClients, auto-tagging is now derived
           const sortedClients = clientsList.map(client => {
             // Guarantee stable key based on the best available identifier after merging
-            const phone = client.leads.find(l => l.telefone)?.telefone || client.telefone;
+            // If the client has a lead with an email, use it as the master key.
             const email = client.leads.find(l => l.email)?.email || client.email;
+            const phone = client.leads.find(l => l.telefone)?.telefone || client.telefone;
             const name = client.leads.find(l => l.nome && l.nome !== 'Sem Nome')?.nome || client.nome;
             
-            const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+            const stableKey = email ? `email_${email.toLowerCase().trim()}` : (phone ? `tel_${cleanPhone(phone)}` : `name_${name.toLowerCase().trim()}`);
 
             return {
               ...client,
@@ -1774,12 +1778,15 @@ export default function App() {
                                   "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
                                   (client.assignedWhatsappId && assignedAcc)
                                     ? "text-white" 
-                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
+                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500",
+                                  (assignedAcc?.status === 'down') && "bg-rose-500 border-rose-600 animate-pulse"
                                 )}
-                                style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
+                                style={(client.assignedWhatsappId && assignedAcc && assignedAcc.status !== 'down') ? { backgroundColor: assignedAcc.color } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
-                                  <span className="text-[11px] font-black">{assignedAcc.identifier}</span>
+                                  <span className="text-[11px] font-black">
+                                    {assignedAcc.status === 'down' ? <PhoneOff size={12} /> : assignedAcc.identifier}
+                                  </span>
                                 ) : (
                                   <Phone size={14} />
                                 )}
@@ -1820,11 +1827,13 @@ export default function App() {
                                         client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
                                       )}
                                     >
-                                      <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm" style={{ backgroundColor: acc.color }}>
-                                        {acc.identifier}
+                                      <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm" style={{ backgroundColor: acc.status === 'down' ? '#e11d48' : acc.color }}>
+                                        {acc.status === 'down' ? <PhoneOff size={10} /> : acc.identifier}
                                       </div>
                                       <div className="flex flex-col min-w-0">
-                                        <span className="truncate text-modern-text leading-none mb-1">{acc.name}</span>
+                                        <span className={cn("truncate text-modern-text leading-none mb-1", acc.status === 'down' && "text-rose-600 font-black")}>
+                                          {acc.name} {acc.status === 'down' && "(CAIU)"}
+                                        </span>
                                         <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-60">{acc.origin}</span>
                                       </div>
                                     </button>
@@ -3038,7 +3047,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setShowWhatsappManager(false);
-                    setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "" });
+                    setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "", status: 'active' });
                   }}
                   className="w-10 h-10 flex items-center justify-center rounded-none border border-modern-border bg-white text-modern-secondary hover:text-rose-500 transition-colors"
                 >
@@ -3053,6 +3062,30 @@ export default function App() {
                     {(whatsappForm as any).id ? "Editar Conta" : "Cadastrar Novo"}
                   </h4>
                   <div className="space-y-4">
+                    <div className="p-4 bg-slate-50 border border-modern-border flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-modern-text tracking-widest mb-1">Status da Conta</p>
+                        <p className={cn(
+                          "text-[9px] font-bold uppercase opacity-70",
+                          whatsappForm.status === 'down' ? "text-rose-600" : "text-emerald-600"
+                        )}>
+                          {whatsappForm.status === 'down' ? "Caiu / Inativo" : "Ativo / Operando"}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setWhatsappForm({ ...whatsappForm, status: whatsappForm.status === 'down' ? 'active' : 'down' })}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          whatsappForm.status !== 'down' ? "bg-emerald-500" : "bg-rose-500"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1 w-4 h-4 bg-white shadow-sm transition-all",
+                          whatsappForm.status !== 'down' ? "left-7" : "left-1"
+                        )} />
+                      </button>
+                    </div>
+
                     <div>
                       <label className="text-[10px] font-bold uppercase text-modern-secondary mb-1.5 block">Nome do Atendente</label>
                       <input 
@@ -3119,7 +3152,7 @@ export default function App() {
                       </button>
                       {(whatsappForm as any).id && (
                         <button 
-                          onClick={() => setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "" })}
+                          onClick={() => setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "", status: 'active' })}
                           className="w-full bg-slate-100 text-modern-secondary py-3 font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
                         >
                           Cancelar Edição
@@ -3134,17 +3167,35 @@ export default function App() {
                   <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
                     {whatsappAccounts.map(acc => (
-                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col min-h-[140px]">
+                      <div key={acc.id} className={cn(
+                        "bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col min-h-[140px]",
+                        acc.status === 'down' && "border-rose-300 bg-rose-50/30"
+                      )}>
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-4 min-w-0 flex-1">
                             <div 
-                              className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
-                              style={{ backgroundColor: acc.color }}
+                              className={cn(
+                                "w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm transition-all",
+                                acc.status === 'down' && "bg-rose-600 animate-pulse"
+                              )}
+                              style={acc.status !== 'down' ? { backgroundColor: acc.color } : {}}
                             >
-                              <span className="text-[11px] font-black">{acc.identifier}</span>
+                              <span className="text-[11px] font-black">
+                                {acc.status === 'down' ? <PhoneOff size={16} /> : acc.identifier}
+                              </span>
                             </div>
                             <div className="min-w-0 flex-1 pr-2">
-                              <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight mb-1">{acc.name}</p>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className={cn(
+                                  "text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight",
+                                  acc.status === 'down' && "text-rose-600"
+                                )}>
+                                  {acc.name}
+                                </p>
+                                {acc.status === 'down' && (
+                                  <span className="text-[8px] bg-rose-600 text-white px-1 py-0.5 font-black uppercase">Caiu</span>
+                                )}
+                              </div>
                               <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
                             </div>
                           </div>
