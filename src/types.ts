@@ -34,7 +34,6 @@ export interface WhatsAppAccount {
   color: string;
   phoneNumber: string;
   identifier: string; // The "numero de identificação ID" requested
-  status?: 'active' | 'down';
 }
 
 export interface ManualSale {
