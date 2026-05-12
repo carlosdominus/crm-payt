@@ -64,6 +64,16 @@ export interface WorkspaceKey {
   createdAt: string;
 }
 
+export type ClientTag = 'pendente' | 'vendido' | 'lixo' | 'contato_sucesso' | 'contato_falha' | 'reloginho';
+
+export interface InteractionLog {
+  id: string;
+  clientKey: string;
+  type: 'tag_change' | 'payment_status_change' | 'manual_sale' | 'tracking_code';
+  content: string;
+  timestamp: string;
+}
+
 export interface Client {
   email: string;
   nome: string;
@@ -74,7 +84,11 @@ export interface Client {
   lastPurchaseDate: string;
   lastPurchaseTimestamp: number;
   status: string; // Overall status (e.g., most recent)
-  tag?: 'pendente' | 'vendido' | 'lixo' | null;
+  tag?: ClientTag | null;
+  tagUpdatedAt?: string;
+  paymentStatus?: 'link_enviado' | 'pix_enviado' | 'boleto_enviado' | null;
+  paymentStatusUpdatedAt?: string;
+  potsCount?: number; // 1, 3, or 6
   manualSales?: ManualSale[];
   trackingCode?: string;
   assignedWhatsappId?: string;

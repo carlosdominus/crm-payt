@@ -20,16 +20,21 @@ import {
   ChevronDown,
   Phone,
   Edit,
-  Mail,
   Key,
   LayoutDashboard,
+  AtSign,
   Plus,
   TrendingUp,
   DollarSign,
-  Users
+  Users,
+  UserX,
+  UserCheck,
+  AlertCircle,
+  Hash,
+  ShoppingBag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format } from 'date-fns';
+import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format, differenceInHours, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 import { 
@@ -53,7 +58,7 @@ import {
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -156,7 +161,7 @@ export default function App() {
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'partners'>('general');
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
-  const [view, setView] = useState<'crm' | 'dashboard'>('crm');
+  const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
@@ -439,6 +444,19 @@ export default function App() {
         }
         setActivePartnerKey(key);
         localStorage.setItem('crm_partner_key', key);
+        
+        // Record partnership in Firestore for security rules
+        if (user) {
+          await setDoc(doc(db, 'partnerships', `${data.ownerUid}_${user.uid}`), {
+            ownerUid: data.ownerUid,
+            ownerEmail: data.ownerEmail,
+            partnerUid: user.uid,
+            partnerEmail: user.email,
+            keyUsed: key,
+            connectedAt: new Date().toISOString()
+          });
+        }
+
         setAccessKeyInput("");
         setPartnerWorkspaceData(data);
       } else {
@@ -568,17 +586,82 @@ export default function App() {
     }
 
     const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/clientData`), (snapshot) => {
-      const data: Record<string, any> = {};
+      const pStatuses: Record<string, any> = {};
+      const pCounts: Record<string, number> = {};
+      const extraData: Record<string, any> = {};
+      
       snapshot.docs.forEach(doc => {
-        data[doc.id] = doc.data();
+        const data = doc.data();
+        if (data.paymentStatus) {
+          pStatuses[data.clientKey] = {
+            status: data.paymentStatus,
+            updatedAt: data.paymentStatusUpdatedAt
+          };
+        }
+        if (data.potsCount) {
+          pCounts[data.clientKey] = data.potsCount;
+        }
+        extraData[data.clientKey] = data;
       });
-      setClientExtraData(data);
+      
+      setPaymentStatuses(pStatuses);
+      setPotsCounts(pCounts);
+      setClientExtraData(extraData);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/clientData`);
     });
 
     return () => unsubscribe();
   }, [authReady, effectiveWorkspaceId]);
+
+  const addInteractionLog = async (clientKey: string, type: InteractionLog['type'], content: string) => {
+    if (!user || !effectiveWorkspaceId) return;
+    try {
+      const logRef = doc(collection(db, `users/${effectiveWorkspaceId}/history`));
+      await setDoc(logRef, {
+        clientKey,
+        type,
+        content,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error("Erro ao salvar log:", e);
+    }
+  };
+
+  const updatePaymentStatus = async (clientKey: string, status: 'link_enviado' | 'pix_enviado' | 'boleto_enviado' | null) => {
+    if (!user || !effectiveWorkspaceId) return;
+    try {
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
+      const now = new Date().toISOString();
+      await setDoc(docRef, {
+        clientKey,
+        paymentStatus: status,
+        paymentStatusUpdatedAt: now,
+        updatedAt: now
+      }, { merge: true });
+      
+      if (status) {
+        addInteractionLog(clientKey, 'payment_status_change', `Status de pagamento alterado para: ${status.replace('_', ' ')}`);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/clientData/${clientKey}`);
+    }
+  };
+
+  const updatePotsCount = async (clientKey: string, count: number) => {
+    if (!user || !effectiveWorkspaceId) return;
+    try {
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
+      await setDoc(docRef, {
+        clientKey,
+        potsCount: count,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/clientData/${clientKey}`);
+    }
+  };
 
   useEffect(() => {
     if (!authReady || !effectiveWorkspaceId) {
@@ -647,7 +730,7 @@ export default function App() {
   const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string }) => {
     if (!user) return;
     try {
-      const docRef = doc(db, `users/${user.uid}/clientData`, clientKey);
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
       const currentData = clientExtraData[clientKey] || {};
       const newData = {
         clientKey,
@@ -657,6 +740,10 @@ export default function App() {
       };
       
       await setDoc(docRef, newData, { merge: true });
+
+      if (updates.trackingCode) {
+        addInteractionLog(clientKey, 'tracking_code', `Código de rastreio atualizado: ${updates.trackingCode}`);
+      }
 
       // Local update for immediate feedback
       setClientExtraData(prev => ({
@@ -685,11 +772,37 @@ export default function App() {
       }
     } catch (error) {
       // @ts-ignore
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/clientData/${clientKey}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/clientData/${clientKey}`);
     }
   };
 
-  const [clientTags, setClientTags] = useState<Record<string, 'pendente' | 'vendido' | 'lixo' | null>>({});
+  const [clientTags, setClientTags] = useState<Record<string, ClientTag | null>>({});
+  const [tagTimestamps, setTagTimestamps] = useState<Record<string, string>>({});
+  const [paymentStatuses, setPaymentStatuses] = useState<Record<string, any>>({});
+  const [potsCounts, setPotsCounts] = useState<Record<string, number>>({});
+  const [interactionLogs, setInteractionLogs] = useState<Record<string, InteractionLog[]>>({});
+
+  useEffect(() => {
+    if (!authReady || !effectiveWorkspaceId) return;
+
+    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/history`), (snapshot) => {
+      const logsByClient: Record<string, InteractionLog[]> = {};
+      snapshot.docs.forEach(doc => {
+        const data = doc.data() as InteractionLog;
+        if (!logsByClient[data.clientKey]) logsByClient[data.clientKey] = [];
+        logsByClient[data.clientKey].push({ ...data, id: doc.id });
+      });
+      // Sort logs by timestamp desc
+      Object.keys(logsByClient).forEach(key => {
+        logsByClient[key].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      });
+      setInteractionLogs(logsByClient);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/history`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, effectiveWorkspaceId]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -711,23 +824,26 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = onSnapshot(collection(db, `users/${user.uid}/tags`), (snapshot) => {
-      const tags: Record<string, 'pendente' | 'vendido' | 'lixo' | null> = {};
+    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/tags`), (snapshot) => {
+      const tags: Record<string, ClientTag | null> = {};
+      const timestamps: Record<string, string> = {};
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        // Legacy support: map 'feito' to 'vendido'
-        tags[data.clientKey] = data.tag === 'feito' ? 'vendido' : data.tag;
+        tags[data.clientKey] = data.tag;
+        if (data.updatedAt) timestamps[data.clientKey] = data.updatedAt;
       });
       setClientTags(tags);
+      setTagTimestamps(timestamps);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/tags`);
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/tags`);
     });
 
     return () => unsubscribe();
   }, [authReady, user]);
 
-  const toggleTag = async (clientKey: string, tag: 'pendente' | 'vendido' | 'lixo') => {
+  const toggleTag = async (clientKey: string, tag: ClientTag) => {
     const newTag = clientTags[clientKey] === tag ? null : tag;
+    const now = new Date().toISOString();
 
     if (!user) {
       const updatedTags = { ...clientTags, [clientKey]: newTag };
@@ -737,18 +853,25 @@ export default function App() {
     }
     
     try {
-      const tagRef = doc(db, `users/${user.uid}/tags`, clientKey);
+      const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, clientKey);
       if (newTag === null) {
         await deleteDoc(tagRef);
+        setTagTimestamps(prev => {
+          const next = { ...prev };
+          delete next[clientKey];
+          return next;
+        });
       } else {
         await setDoc(tagRef, {
           clientKey,
           tag: newTag,
-          updatedAt: new Date().toISOString()
+          updatedAt: now
         });
+        setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
+        addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${newTag}`);
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/tags/${clientKey}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/tags/${clientKey}`);
     }
 
     // Sync to Google Sheets if webhook is configured
@@ -833,9 +956,10 @@ export default function App() {
     }
 
     try {
-      await setDoc(doc(db, `users/${user.uid}/sales`, saleId), newSale);
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/sales`, saleId), newSale);
+      addInteractionLog(newSale.clientKey, 'manual_sale', `Venda manual registrada: ${newSale.productName} (R$ ${newSale.value})`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/sales/${saleId}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/sales/${saleId}`);
     }
 
     setShowAddSaleModal(false);
@@ -907,9 +1031,9 @@ export default function App() {
       localStorage.setItem('crm_manual_sales', JSON.stringify(updatedSales));
     } else {
       try {
-        await deleteDoc(doc(db, `users/${user.uid}/sales`, saleId));
+        await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/sales`, saleId));
       } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/sales/${saleId}`);
+        handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/sales/${saleId}`);
       }
     }
 
@@ -1324,6 +1448,56 @@ export default function App() {
     return Array.from(statuses).sort();
   }, [enrichedClients]);
 
+  const followupClients = useMemo(() => {
+    return enrichedClients.filter(client => {
+      const clientKey = client.key;
+      const tag = clientTags[clientKey];
+      const tagDateStr = tagTimestamps[clientKey];
+      const pStatus = paymentStatuses[clientKey];
+      const potCount = potsCounts[clientKey];
+      const lastPurchase = client.lastPurchaseDate ? new Date(client.lastPurchaseDate) : null;
+      const now = new Date();
+
+      // Rule 1: Reloginho (1 day)
+      if (tag === 'reloginho' && tagDateStr) {
+        if (differenceInDays(now, new Date(tagDateStr)) >= 1) return true;
+      }
+
+      // Rule 2: Pix (1 hour)
+      if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+        if (differenceInHours(now, new Date(pStatus.updatedAt)) >= 1) return true;
+      }
+
+      // Rule 3: Link (1 hour)
+      if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+        if (differenceInHours(now, new Date(pStatus.updatedAt)) >= 1) return true;
+      }
+
+      // Rule 4: Boleto (2 days)
+      if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+        if (differenceInDays(now, new Date(pStatus.updatedAt)) >= 2) return true;
+      }
+
+      // Rule 5: Pots (Infer from product if not manually set)
+      let effectivePotCount = potCount || 0;
+      if (effectivePotCount === 0 && client.leads?.[0]?.produto) {
+        const prodName = client.leads[0].produto.toLowerCase();
+        if (prodName.includes('6 pote')) effectivePotCount = 6;
+        else if (prodName.includes('3 pote')) effectivePotCount = 3;
+        else if (prodName.includes('1 pote')) effectivePotCount = 1;
+      }
+
+      if (effectivePotCount > 0 && lastPurchase) {
+        const daysSince = differenceInDays(now, lastPurchase);
+        if (effectivePotCount === 1 && daysSince >= 45) return true;
+        if (effectivePotCount === 3 && daysSince >= 105) return true;
+        if (effectivePotCount === 6 && daysSince >= 195) return true;
+      }
+
+      return false;
+    });
+  }, [enrichedClients, clientTags, tagTimestamps, paymentStatuses, potsCounts]);
+
   const whatsappStats = useMemo(() => {
     const distributionMap = new Map<string, number>();
     const salesValueMap = new Map<string, number>();
@@ -1482,15 +1656,25 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+               <button 
+                onClick={() => setView(view === 'followup' ? 'crm' : 'followup')}
+                className={cn(
+                  "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
+                  view === 'followup' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
+                )}
+                title="Ver Follow-up"
+              >
+                <Clock size={18} />
+              </button>
               <button 
-                onClick={() => setView(view === 'crm' ? 'dashboard' : 'crm')}
+                onClick={() => setView(view === 'dashboard' ? 'crm' : 'dashboard')}
                 className={cn(
                   "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
                   view === 'dashboard' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
                 )}
-                title={view === 'crm' ? "Ver Dashboard" : "Ver CRM"}
+                title={view === 'dashboard' ? "Ver CRM" : "Ver Dashboard"}
               >
-                {view === 'crm' ? <LayoutDashboard size={18} /> : <Users size={18} />}
+                {view === 'dashboard' ? <Users size={18} /> : <LayoutDashboard size={18} />}
               </button>
               <button 
                 onClick={() => setShowSettings(true)}
@@ -1518,7 +1702,124 @@ export default function App() {
         </header>
         
         <div className="flex-1 overflow-hidden flex flex-col">
-          {view === 'crm' ? (
+          {view === 'followup' ? (
+            <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-modern-text">Dashboard de Follow-up</h2>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Leads aguardando retorno baseado em regras de tempo</p>
+                </div>
+                <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4">
+                   <Clock size={20} className="text-modern-primary" />
+                   <div>
+                     <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
+                     <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
+                   </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-modern-border overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-[#f8f9fa]">
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {followupClients.map(client => {
+                        const tag = clientTags[client.key];
+                        const tagDateStr = tagTimestamps[client.key];
+                        const pStatus = paymentStatuses[client.key];
+                        const potCount = potsCounts[client.key];
+                        const now = new Date();
+
+                        let reason = "";
+                        let displayTime = "";
+                        
+                        if (tag === 'reloginho' && tagDateStr) {
+                           reason = "Follow-up Manual (Reloginho)";
+                           displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
+                        } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Pix Enviado";
+                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                        } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Link de Pagamento";
+                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                        } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Boleto";
+                           displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
+                        } else if (potCount > 0 && client.lastPurchaseDate) {
+                           reason = `Recompra - ${potCount} Pote(s)`;
+                           displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
+                        }
+
+                        return (
+                          <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
+                                  {client.nome.charAt(0)}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-modern-text">{client.nome}</p>
+                                  <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                              <div className="flex items-center gap-2">
+                                 <AlertCircle size={14} className="text-orange-500" />
+                                 <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                               <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                            </td>
+                            <td className="px-4 py-4 border-b border-[#dadce0]">
+                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                                 <button 
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     const msg = `Olá ${client.nome}, estou passando para...`;
+                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                     window.open(url, '_blank');
+                                   }}
+                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                                 >
+                                   Chamar no Zap
+                                 </button>
+                                 <button 
+                                   onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleTag(client.key, 'contato_sucesso');
+                                   }}
+                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                                 >
+                                   Resolvido
+                                 </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {followupClients.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-20 text-center">
+                            <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
+                            <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : view === 'crm' ? (
             <>
               <div className="px-10 py-6 flex flex-wrap items-center gap-6 shrink-0">
           <div className="relative flex-1 max-w-md">
@@ -1628,8 +1929,9 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-2">
                           {[
                             { id: 'all', label: 'Todas' },
-                            { id: 'enviar msg', label: 'Enviar Msg' },
-                            { id: 'pendente', label: 'Pendente' },
+                            { id: 'reloginho', label: 'Reloginho' },
+                            { id: 'contato_sucesso', label: 'Sucesso' },
+                            { id: 'contato_falha', label: 'Falha' },
                             { id: 'vendido', label: 'Vendido' },
                             { id: 'lixo', label: 'Lixo' }
                           ].map((item) => (
@@ -1728,29 +2030,70 @@ export default function App() {
                               </button>
                             )}
                             <button 
-                              onClick={() => toggleTag(clientKey, 'pendente')}
+                              onClick={() => toggleTag(clientKey, 'reloginho')}
                               className={cn(
                                 "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
-                                currentTag === 'pendente' 
-                                  ? "bg-amber-100 border-amber-200 text-amber-600" 
+                                currentTag === 'reloginho' 
+                                  ? "bg-blue-100 border-blue-200 text-blue-600" 
                                   : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
                               )}
-                              title="Pendente (Aguardando Resposta)"
+                              title="Reloginho (Follow-up)"
                             >
                               <Clock size={12} />
                             </button>
-                            <button 
-                              onClick={() => toggleTag(clientKey, 'vendido')}
-                              className={cn(
-                                "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
-                                currentTag === 'vendido' 
-                                  ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
-                                  : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                              )}
-                              title="Vendido"
-                            >
-                              <CheckCircle2 size={12} />
-                            </button>
+                            
+                            {/* Hover Menu for action tags */}
+                            <div className="relative group/tagmenu" onClick={(e) => e.stopPropagation()}>
+                              <button 
+                                className={cn(
+                                  "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
+                                  ['contato_sucesso', 'contato_falha', 'vendido'].includes(currentTag as string)
+                                    ? "bg-modern-primary border-modern-primary text-white" 
+                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                )}
+                              >
+                                <Plus size={12} />
+                              </button>
+                              
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/tagmenu:flex bg-white border border-modern-border shadow-xl z-50 p-1 gap-1">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_sucesso'); }}
+                                  className={cn(
+                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    currentTag === 'contato_sucesso' 
+                                      ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
+                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                  )}
+                                  title="Contato Bem Sucedido"
+                                >
+                                  <UserCheck size={14} />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_falha'); }}
+                                  className={cn(
+                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    currentTag === 'contato_falha' 
+                                      ? "bg-gray-100 border-gray-300 text-gray-800" 
+                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                  )}
+                                  title="Contato Mal Sucedido"
+                                >
+                                  <UserX size={14} />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'vendido'); }}
+                                  className={cn(
+                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    currentTag === 'vendido' 
+                                      ? "bg-emerald-500 border-emerald-600 text-white" 
+                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                  )}
+                                  title="Vendido"
+                                >
+                                  <CheckCircle2 size={14} />
+                                </button>
+                              </div>
+                            </div>
                             <button 
                               onClick={() => toggleTag(clientKey, 'lixo')}
                               className={cn(
@@ -2431,7 +2774,7 @@ export default function App() {
                 <div className="mb-12">
                   <h2 className="text-4xl font-extrabold tracking-tight text-modern-text mb-3 leading-tight">{currentSelectedClient.nome}</h2>
                   <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary mb-6">
-                    <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Mail size={14} /> {currentSelectedClient.email}</p>
+                    <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><AtSign size={14} /> {currentSelectedClient.email}</p>
                     <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Phone size={14} /> {currentSelectedClient.telefone}</p>
                   </div>
                   
@@ -2469,6 +2812,38 @@ export default function App() {
                           onChange={(e) => updateClientExtra(currentSelectedClient.key, { trackingCode: e.target.value })}
                           className="w-full bg-transparent border-b border-modern-text/20 focus:border-modern-text focus:outline-none text-xs font-bold py-1 placeholder:text-modern-secondary/30"
                         />
+                      </div>
+                    </div>
+
+                    {/* Payment Status */}
+                    <div className="flex items-center gap-3 bg-slate-50 p-4 border border-modern-border">
+                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0">
+                        <DollarSign size={16} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[10px] font-black uppercase text-modern-secondary tracking-tighter mb-2">Status de Pagamento Enviado</p>
+                        <div className="flex items-center gap-2">
+                          {[
+                            { id: 'link_enviado', label: 'Link de Pagamento', color: 'blue' },
+                            { id: 'pix_enviado', label: 'Chave Pix', color: 'emerald' },
+                            { id: 'boleto_enviado', label: 'Boleto Bancário', color: 'orange' }
+                          ].map((ps) => (
+                            <button
+                              key={ps.id}
+                              onClick={() => {
+                                updatePaymentStatus(currentSelectedClient.key, paymentStatuses[currentSelectedClient.key]?.status === ps.id ? null : ps.id as any);
+                              }}
+                              className={cn(
+                                "flex-1 px-3 py-2 text-[10px] font-black uppercase transition-all border",
+                                paymentStatuses[currentSelectedClient.key]?.status === ps.id
+                                  ? `bg-${ps.color}-600 border-${ps.color}-700 text-white shadow-sm`
+                                  : `bg-white border-slate-200 text-slate-400 hover:border-${ps.color}-300 hover:bg-slate-50`
+                              )}
+                            >
+                              {ps.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2544,6 +2919,25 @@ export default function App() {
 
                 {/* History Section */}
                 <div className="flex-1">
+                  <div className="space-y-8 mb-12">
+                    {interactionLogs[currentSelectedClient.key] && (
+                      <div className="space-y-4">
+                        <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest border-b border-modern-border pb-2">Histórico de Interações</p>
+                        {interactionLogs[currentSelectedClient.key].map(log => (
+                          <div key={log.id} className="flex gap-4 items-start bg-emerald-50/30 p-4 border border-emerald-100">
+                             <div className="w-6 h-6 bg-emerald-600 flex items-center justify-center shrink-0">
+                                {log.type === 'tag_change' ? <AlertCircle size={12} className="text-white" /> : <Database size={12} className="text-white" />}
+                             </div>
+                             <div>
+                               <p className="text-xs font-bold text-modern-text">{log.content}</p>
+                               <p className="text-[9px] font-black text-emerald-600 uppercase mt-1">{format(new Date(log.timestamp), "dd/MM 'às' HH:mm", { locale: ptBR })}</p>
+                             </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex items-center gap-3 mb-8">
                     <div className="w-8 h-8 bg-modern-primary/10 rounded-none flex items-center justify-center text-modern-primary">
                       <History size={18} />

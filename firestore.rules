@@ -17,8 +17,6 @@ service cloud.firestore {
 
     function isPartner(ownerId) {
       // 1. Domain Access
-      // Check if the owner has enabled domain access for the user's domain
-      // We store this in workspaceConfig for the owner
       let userDomain = request.auth.token.email.split('@')[1];
       let hasDomainAccess = isSignedIn() && exists(/databases/$(database)/documents/workspaceConfig/$(ownerId)) 
         && get(/databases/$(database)/documents/workspaceConfig/$(ownerId)).data.domainAccessEnabled == true
@@ -26,24 +24,13 @@ service cloud.firestore {
         
       if (hasDomainAccess) { return true; }
       
-      // 2. Manual Access (Legacy/Fallback via invites)
-      // We check if there's an invite for this user
-      // Since we don't have a direct composite ID, we have to rely on the client's query
-      // but for 'get', we'd need to know the invite ID.
-      // This is harder. For now, let's prioritize Domain Access as the user requested.
+      // 2. Partnership Access (Keys)
+      let partnershipPath = /databases/$(database)/documents/partnerships/$(ownerId + "_" + request.auth.uid);
+      if (isSignedIn() && exists(partnershipPath)) { return true; }
+
+      // 3. Fallback: Check for accepted invite
+      // For simplicity/performance, partnerships handles most cases now
       return false;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
     }
 
     // --- Core User Data (Accessible by Owner and Partners) ---
@@ -59,20 +46,31 @@ service cloud.firestore {
 
     match /workspaceKeys/{key} {
       allow get: if isSignedIn();
-      allow create, update: if isSignedIn() && request.auth.uid == incoming().ownerUid;
-      allow delete: if isSignedIn() && request.auth.uid == existing().ownerUid;
+      allow create, update, delete: if isSignedIn() && (
+        (resource == null && request.resource.data.ownerUid == request.auth.uid) || 
+        (resource != null && resource.data.ownerUid == request.auth.uid)
+      );
     }
 
     match /domainWorkspaces/{domain} {
       allow get: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == incoming().ownerUid;
-      allow delete: if isSignedIn() && request.auth.uid == existing().ownerUid;
+      allow create, update, delete: if isSignedIn() && (
+        (resource == null && request.resource.data.ownerUid == request.auth.uid) || 
+        (resource != null && resource.data.ownerUid == request.auth.uid)
+      );
+    }
+
+    match /partnerships/{partnershipId} {
+      // Allows owner or partner to manage the connection
+      allow read: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.partnerUid == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.partnerUid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.partnerUid == request.auth.uid);
     }
 
     match /invites/{inviteId} {
-      allow read: if isSignedIn() && (request.auth.uid == resource.data.ownerUid || request.auth.token.email.lower() == resource.data.inviteeEmail.lower());
-      allow create: if isSignedIn() && request.auth.uid == incoming().ownerUid;
-      allow delete: if isSignedIn() && request.auth.uid == resource.data.ownerUid;
+      allow read: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || request.auth.token.email.lower() == resource.data.inviteeEmail.lower());
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
     }
   }
 }
