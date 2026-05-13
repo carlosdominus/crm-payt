@@ -601,6 +601,9 @@ export default function App() {
         if (data.potsCount) {
           pCounts[data.clientKey] = data.potsCount;
         }
+        
+        // Legacy tag support: if tag exists in clientData, we'll keep it in extraData
+        // and we might need to sync it to clientTags state elsewhere
         extraData[data.clientKey] = data;
       });
       
@@ -810,53 +813,81 @@ export default function App() {
     if (!user) {
       const saved = localStorage.getItem('crm_client_tags');
       if (saved) {
-        const parsed = JSON.parse(saved);
-        const migrated: Record<string, any> = {};
-        Object.entries(parsed).forEach(([key, val]) => {
-          if (val === 'entrar em contato') migrated[key] = 'pendente';
-          else if (val === 'contato enviado' || val === 'feito') migrated[key] = 'vendido';
-          else migrated[key] = val;
-        });
-        setClientTags(migrated);
-      } else {
-        setClientTags({});
+        try {
+          const parsed = JSON.parse(saved);
+          const migrated: Record<string, any> = {};
+          Object.entries(parsed).forEach(([key, val]) => {
+            if (val === 'entrar em contato') migrated[key] = 'pendente';
+            else if (val === 'contato enviado' || val === 'feito') migrated[key] = 'vendido';
+            else migrated[key] = val;
+          });
+          setClientTags(migrated);
+        } catch (e) {
+          console.error("Erro ao carregar tags locais:", e);
+        }
       }
       return;
     }
 
     const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/tags`), (snapshot) => {
-      const tags: Record<string, ClientTag | null> = {};
+      const dbTags: Record<string, ClientTag | null> = {};
       const timestamps: Record<string, string> = {};
+      
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        tags[data.clientKey] = data.tag;
+        // Fallback for legacy names and standardization
+        let t = data.tag;
+        if (t === 'feito' || t === 'contato enviado') t = 'vendido';
+        if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
+        
+        dbTags[data.clientKey] = t;
         if (data.updatedAt) timestamps[data.clientKey] = data.updatedAt;
       });
-      setClientTags(tags);
+      
+      setClientTags(prev => {
+        const newTags = { ...prev };
+        // First, incorporate all tags found in clientExtraData (potential legacy location)
+        Object.entries(clientExtraData).forEach(([key, data]) => {
+          if (data.tag && !newTags[key]) {
+            newTags[key] = data.tag;
+          }
+        });
+        // Then override with authoritative data from 'tags' collection
+        return { ...newTags, ...dbTags };
+      });
       setTagTimestamps(timestamps);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/tags`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user, effectiveWorkspaceId]);
+  }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
-    const newTag = clientTags[clientKey] === tag ? null : tag;
+    if (!effectiveWorkspaceId) return;
+    
+    // Use functional update to ensure we have the absolute latest state
+    let resolvedNewTag: ClientTag | null = null;
+    
+    setClientTags(prev => {
+      const current = prev[clientKey];
+      resolvedNewTag = current === tag ? null : tag;
+      return { ...prev, [clientKey]: resolvedNewTag };
+    });
+
     const now = new Date().toISOString();
 
-    // Optimistic update
-    setClientTags(prev => ({ ...prev, [clientKey]: newTag }));
-
     if (!user) {
-      const updatedTags = { ...clientTags, [clientKey]: newTag };
+      const saved = localStorage.getItem('crm_client_tags');
+      const parsed = saved ? JSON.parse(saved) : {};
+      const updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
       localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
       return;
     }
     
     try {
       const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, clientKey);
-      if (newTag === null) {
+      if (resolvedNewTag === null) {
         await deleteDoc(tagRef);
         setTagTimestamps(prev => {
           const next = { ...prev };
@@ -866,11 +897,11 @@ export default function App() {
       } else {
         await setDoc(tagRef, {
           clientKey,
-          tag: newTag,
+          tag: resolvedNewTag,
           updatedAt: now
         });
         setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
-        addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${newTag}`);
+        addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${resolvedNewTag}`);
       }
     } catch (error) {
       // Revert on error
@@ -881,18 +912,16 @@ export default function App() {
     // Sync to Google Sheets if webhook is configured
     if (webhookUrl) {
       try {
-        // Enviar dados extras para ajudar a planilha a identificar o cliente
         const client = clients.find(c => c.key === clientKey);
-        
         await fetch(webhookUrl, {
           method: 'POST',
-          mode: 'no-cors', // Mantido no-cors para evitar problemas com Google Apps Script
+          mode: 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'tag_update',
             clientKey,
-            tag: newTag || 'limpar', // 'limpar' se a tag for removida
-            label: !newTag ? '' : (newTag === 'vendido' ? 'Vendido' : newTag === 'pendente' ? 'Pendente' : 'Lixo'),
+            tag: resolvedNewTag || 'limpar',
+            label: !resolvedNewTag ? '' : (resolvedNewTag === 'vendido' ? 'Vendido' : resolvedNewTag === 'reloginho' || resolvedNewTag === 'pendente' ? 'Pendente' : 'Lixo'),
             nome: client?.nome || '',
             telefone: client?.telefone || '',
             email: client?.email || '',
@@ -2260,17 +2289,17 @@ export default function App() {
                               "px-2 py-0.5 rounded-none text-[9px] font-black uppercase shadow-sm flex items-center justify-center",
                               !currentTag ? "bg-[#DBEAFE] text-blue-700" :
                               (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
-                              currentTag === 'vendido' ? "bg-[#D0FBE5] text-emerald-700" :
-                              currentTag === 'contato_sucesso' ? "bg-emerald-100 text-emerald-700" :
+                              (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700" :
                               currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700" :
-                              "bg-[#FFE3E6] text-rose-700"
+                              currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700" :
+                              "bg-slate-100 text-slate-600"
                             )}>
                               {!currentTag ? 'Enviar Msg' : 
                                (currentTag === 'pendente' || currentTag === 'reloginho') ? 'Pendente' : 
-                               currentTag === 'vendido' ? 'Vendido' : 
-                               currentTag === 'contato_sucesso' ? 'C. Sucesso' :
+                               (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? 'Sucesso' : 
                                currentTag === 'contato_falha' ? 'C. Falha' :
-                               'Lixo'}
+                               currentTag === 'lixo' ? 'Lixo' :
+                               'Status'}
                             </div>
                             {lastLead?.tags && (
                               <div className="px-1.5 py-0.5 rounded-none bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
