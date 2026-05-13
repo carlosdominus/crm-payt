@@ -805,7 +805,7 @@ export default function App() {
   }, [authReady, effectiveWorkspaceId]);
 
   useEffect(() => {
-    if (!authReady) return;
+    if (!authReady || !effectiveWorkspaceId) return;
 
     if (!user) {
       const saved = localStorage.getItem('crm_client_tags');
@@ -839,15 +839,17 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, effectiveWorkspaceId]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     const newTag = clientTags[clientKey] === tag ? null : tag;
     const now = new Date().toISOString();
 
+    // Optimistic update
+    setClientTags(prev => ({ ...prev, [clientKey]: newTag }));
+
     if (!user) {
       const updatedTags = { ...clientTags, [clientKey]: newTag };
-      setClientTags(updatedTags);
       localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
       return;
     }
@@ -871,6 +873,8 @@ export default function App() {
         addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${newTag}`);
       }
     } catch (error) {
+      // Revert on error
+      setClientTags(prev => ({ ...prev, [clientKey]: clientTags[clientKey] }));
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/tags/${clientKey}`);
     }
 
@@ -2034,10 +2038,10 @@ export default function App() {
                               className={cn(
                                 "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
                                 currentTag === 'reloginho' 
-                                  ? "bg-blue-100 border-blue-200 text-blue-600" 
+                                  ? "bg-amber-100 border-amber-200 text-amber-600" 
                                   : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
                               )}
-                              title="Reloginho (Follow-up)"
+                              title="Pendente (Follow-up)"
                             >
                               <Clock size={12} />
                             </button>
@@ -2255,13 +2259,18 @@ export default function App() {
                             <div className={cn(
                               "px-2 py-0.5 rounded-none text-[9px] font-black uppercase shadow-sm flex items-center justify-center",
                               !currentTag ? "bg-[#DBEAFE] text-blue-700" :
-                              currentTag === 'pendente' ? "bg-[#FEF3C6] text-amber-700" : 
+                              (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
                               currentTag === 'vendido' ? "bg-[#D0FBE5] text-emerald-700" :
+                              currentTag === 'contato_sucesso' ? "bg-emerald-100 text-emerald-700" :
+                              currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700" :
                               "bg-[#FFE3E6] text-rose-700"
                             )}>
                               {!currentTag ? 'Enviar Msg' : 
-                               currentTag === 'pendente' ? 'Pendente' : 
-                               currentTag === 'vendido' ? 'Vendido' : 'Lixo'}
+                               (currentTag === 'pendente' || currentTag === 'reloginho') ? 'Pendente' : 
+                               currentTag === 'vendido' ? 'Vendido' : 
+                               currentTag === 'contato_sucesso' ? 'C. Sucesso' :
+                               currentTag === 'contato_falha' ? 'C. Falha' :
+                               'Lixo'}
                             </div>
                             {lastLead?.tags && (
                               <div className="px-1.5 py-0.5 rounded-none bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
