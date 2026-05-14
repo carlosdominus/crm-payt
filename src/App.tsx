@@ -1302,7 +1302,7 @@ export default function App() {
                 return 0;
               })
             };
-          }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
+          }).sort((a, b) => a.lastPurchaseTimestamp - b.lastPurchaseTimestamp);
 
           setClients(sortedClients);
           setLoading(false);
@@ -1813,27 +1813,55 @@ export default function App() {
                                <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
                             </td>
                             <td className="px-4 py-4 border-b border-[#dadce0]">
-                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-2 shadow-none" onClick={(e) => e.stopPropagation()}>
                                  <button 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     const msg = `Olá ${client.nome}, estou passando para...`;
-                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                     window.open(url, '_blank');
-                                   }}
-                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                                   onClick={(e) => { e.stopPropagation(); copyToClipboard(`${client.nome} - ${client.telefone}`); }}
+                                   className="px-3 py-1.5 bg-slate-100 border border-modern-border text-modern-text text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-modern-primary hover:text-white transition-all shadow-sm"
                                  >
-                                   Chamar no Zap
-                                 </button>
-                                 <button 
-                                   onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleTag(client.key, 'contato_sucesso');
-                                   }}
-                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-                                 >
-                                   Resolvido
-                                 </button>
+                                   <Copy size={14}/>
+                                  </button>
+                                <button 
+                                  onClick={() => toggleTag(client.key, 'reloginho')}
+                                  className={cn(
+                                    "w-8 h-8 rounded-none flex items-center justify-center transition-all border",
+                                    tag === 'reloginho' 
+                                      ? "bg-amber-100 border-amber-200 text-amber-600" 
+                                      : "bg-white border-modern-border text-modern-secondary hover:bg-slate-50"
+                                  )}
+                                  title="Pendente (Follow-up)"
+                                >
+                                  <Clock size={12} />
+                                </button>
+                                <div className="relative group/tagmenu" onClick={(e) => e.stopPropagation()}>
+                                  <button 
+                                    className={cn(
+                                      "w-8 h-8 rounded-none flex items-center justify-center transition-all border",
+                                      ['contato_sucesso', 'contato_falha', 'vendido'].includes(tag as string)
+                                        ? "bg-modern-primary border-modern-primary text-white" 
+                                        : "bg-white border-modern-border text-modern-secondary hover:bg-slate-50"
+                                    )}
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/tagmenu:flex bg-white border border-modern-border shadow-xl z-50 p-1 gap-1">
+                                    <button onClick={(e) => { e.stopPropagation(); toggleTag(client.key, 'contato_sucesso'); }} className={cn("w-8 h-8 border", tag === 'contato_sucesso' ? "bg-emerald-100 text-emerald-600" : "bg-white")} title="Sucesso"><UserCheck size={14} /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); toggleTag(client.key, 'contato_falha'); }} className={cn("w-8 h-8 border", tag === 'contato_falha' ? "bg-gray-100 text-gray-800" : "bg-white")} title="Falha"><UserX size={14} /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); toggleTag(client.key, 'vendido'); }} className={cn("w-8 h-8 border", tag === 'vendido' ? "bg-emerald-500 text-white" : "bg-white")} title="Vendido"><CheckCircle2 size={14} /></button>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={() => toggleTag(client.key, 'lixo')}
+                                  className={cn(
+                                    "w-8 h-8 rounded-none flex items-center justify-center transition-all border",
+                                    tag === 'lixo' 
+                                      ? "bg-rose-100 border-rose-200 text-rose-600" 
+                                      : "bg-white border-modern-border text-modern-secondary hover:bg-slate-50"
+                                  )}
+                                  title="Lixo"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+
                               </div>
                             </td>
                           </tr>
@@ -2015,7 +2043,7 @@ export default function App() {
                   <tr className="bg-[#f8f9fa]">
                     <th className="sticky top-0 z-20 px-2 py-2 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-12">Zap</th>
+                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-32">Zap</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
@@ -2155,7 +2183,10 @@ export default function App() {
                                 style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
-                                  <span className="text-[11px] font-black">{assignedAcc.identifier}</span>
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[10px] font-black leading-none">{assignedAcc.identifier}</span>
+                                    <span className="text-[8px] font-bold uppercase truncate max-w-[80px] mt-0.5">{assignedAcc.name}</span>
+                                  </div>
                                 ) : (
                                   <Phone size={14} />
                                 )}
@@ -2227,23 +2258,26 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-3 py-2 border-b border-r border-[#dadce0]">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 group/client">
                             <div className="w-6 h-6 rounded-none bg-modern-primary/10 flex items-center justify-center text-modern-primary font-bold text-[10px] shrink-0">
                               {client.nome.charAt(0)}
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-normal text-[#202124] truncate">{client.nome}</p>
                             </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                copyToClipboard(client.nome);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded-none transition-all text-[#5f6368]"
-                              title="Copiar nome"
-                            >
-                              <Copy size={12} />
-                            </button>
+                            {client.telefone && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyToClipboard(`${client.nome} - ${client.telefone}`);
+                                }}
+                                className="opacity-0 group-hover/client:opacity-100 p-1 bg-slate-100 hover:bg-modern-primary hover:text-white rounded-none transition-all text-[#5f6368] shadow-sm flex items-center gap-1 border border-[#dadce0]"
+                                title="Copiar Nome + Tel"
+                              >
+                                <Copy size={11} />
+                                <span className="text-[9px] font-bold uppercase">Copiar</span>
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="px-3 py-2 border-b border-r border-[#dadce0]">
@@ -2251,18 +2285,6 @@ export default function App() {
                             <p className="text-sm font-normal text-[#3c4043] flex items-center gap-2">
                               <Phone size={12} className="text-[#5f6368]" /> {client.telefone || <span className="text-rose-400 italic text-[10px]">Sem número</span>}
                             </p>
-                            {client.telefone && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  copyToClipboard(client.telefone);
-                                }}
-                                className="opacity-0 group-hover/phone:opacity-100 p-1 hover:bg-gray-200 rounded-none transition-all text-[#5f6368]"
-                                title="Copiar telefone"
-                              >
-                                <Copy size={12} />
-                              </button>
-                            )}
                           </div>
                         </td>
                         <td className="px-3 py-2 border-b border-r border-[#dadce0]">
@@ -3053,14 +3075,15 @@ export default function App() {
                                 </button>
                               </div>
                               <div className="flex gap-4">
-                                <a 
-                                  href={`https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button 
+                                  onClick={() => {
+                                    const url = `https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage || "")}`;
+                                    window.open(url, '_blank');
+                                  }}
                                   className="modern-button flex-1 flex items-center justify-center gap-3"
                                 >
                                   <ExternalLink size={16} /> Enviar WhatsApp
-                                </a>
+                                </button>
                                 <button 
                                   onClick={() => {setGeneratedMessage(null); setSelectedLead(null);}}
                                   className="modern-button-secondary"
