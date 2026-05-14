@@ -835,33 +835,18 @@ export default function App() {
       
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        // Fallback for legacy names and standardization
-        let t = data.tag;
-        if (t === 'feito' || t === 'contato enviado') t = 'vendido';
-        if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
-        
-        dbTags[data.clientKey] = t;
+        dbTags[data.clientKey] = data.tag;
         if (data.updatedAt) timestamps[data.clientKey] = data.updatedAt;
       });
       
-      setClientTags(prev => {
-        const newTags = { ...prev };
-        // First, incorporate all tags found in clientExtraData (potential legacy location)
-        Object.entries(clientExtraData).forEach(([key, data]) => {
-          if (data.tag && !newTags[key]) {
-            newTags[key] = data.tag;
-          }
-        });
-        // Then override with authoritative data from 'tags' collection
-        return { ...newTags, ...dbTags };
-      });
+      setClientTags(dbTags);
       setTagTimestamps(timestamps);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/tags`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
+  }, [authReady, user, effectiveWorkspaceId]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
@@ -1302,7 +1287,7 @@ export default function App() {
                 return 0;
               })
             };
-          }).sort((a, b) => a.lastPurchaseTimestamp - b.lastPurchaseTimestamp);
+          }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
 
           setClients(sortedClients);
           setLoading(false);
@@ -1528,6 +1513,9 @@ export default function App() {
       }
 
       return false;
+    }).sort((a, b) => {
+      // Oldest first for follow-up (more time elapsed)
+      return (a.lastPurchaseTimestamp || 0) - (b.lastPurchaseTimestamp || 0);
     });
   }, [enrichedClients, clientTags, tagTimestamps, paymentStatuses, potsCounts]);
 
@@ -2175,17 +2163,17 @@ export default function App() {
                               <button 
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
-                                  "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
+                                  "rounded-none flex items-center justify-center transition-all border shadow-sm",
                                   (client.assignedWhatsappId && assignedAcc)
-                                    ? "text-white" 
-                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
+                                    ? "text-white px-3 py-1 min-w-[60px]" 
+                                    : "w-8 h-8 bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
                                   <div className="flex flex-col items-center">
-                                    <span className="text-[10px] font-black leading-none">{assignedAcc.identifier}</span>
-                                    <span className="text-[8px] font-bold uppercase truncate max-w-[80px] mt-0.5">{assignedAcc.name}</span>
+                                    <span className="text-[10px] font-black leading-tight">{assignedAcc.identifier}</span>
+                                    <span className="text-[8px] font-bold uppercase truncate max-w-[80px] leading-tight">{assignedAcc.name}</span>
                                   </div>
                                 ) : (
                                   <Phone size={14} />
