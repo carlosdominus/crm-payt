@@ -835,18 +835,39 @@ export default function App() {
       
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        dbTags[data.clientKey] = data.tag;
+        let t = data.tag;
+        // Normalize legacy tags
+        if (t === 'feito' || t === 'contato enviado') t = 'vendido';
+        if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
+        
+        dbTags[data.clientKey] = t;
         if (data.updatedAt) timestamps[data.clientKey] = data.updatedAt;
       });
       
-      setClientTags(dbTags);
+      setClientTags(prev => {
+        const newTags = { ...prev };
+        // Supplement with tags found in clientExtraData if not already in authoritative tags
+        Object.entries(clientExtraData).forEach(([key, data]) => {
+          if ((data as any).tag) {
+            let t = (data as any).tag;
+            if (t === 'feito' || t === 'contato enviado') t = 'vendido';
+            if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
+            
+            if (!dbTags[key]) {
+              newTags[key] = t;
+            }
+          }
+        });
+        // Override with authoritative data from 'tags' collection
+        return { ...newTags, ...dbTags };
+      });
       setTagTimestamps(timestamps);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/tags`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user, effectiveWorkspaceId]);
+  }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
@@ -1287,7 +1308,7 @@ export default function App() {
                 return 0;
               })
             };
-          }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
+          }).sort((a, b) => a.lastPurchaseTimestamp - b.lastPurchaseTimestamp);
 
           setClients(sortedClients);
           setLoading(false);
@@ -2031,7 +2052,7 @@ export default function App() {
                   <tr className="bg-[#f8f9fa]">
                     <th className="sticky top-0 z-20 px-2 py-2 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-32">Zap</th>
+                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-16">Zap</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
                     <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
@@ -2165,8 +2186,8 @@ export default function App() {
                                 className={cn(
                                   "rounded-none flex items-center justify-center transition-all border shadow-sm",
                                   (client.assignedWhatsappId && assignedAcc)
-                                    ? "text-white px-3 py-1 min-w-[60px]" 
-                                    : "w-8 h-8 bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
+                                    ? "text-white px-2 py-1 min-w-[40px]" 
+                                    : "w-7 h-7 bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
