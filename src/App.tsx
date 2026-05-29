@@ -1263,9 +1263,9 @@ export default function App() {
                 }
               }
             } else {
-              // Deterministic key: email OR phone OR name
+              // Deterministic key: phone OR email OR name
               // BUT we prefix it to avoid collisions between different types
-              const clientKey = lead.email ? `email_${lead.email.toLowerCase()}` : (lead.telefone ? `tel_${lead.telefone}` : `name_${lead.nome.toLowerCase()}`);
+              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
               
               const newClient: Client = {
                 email: lead.email,
@@ -1291,7 +1291,7 @@ export default function App() {
             const email = client.leads.find(l => l.email)?.email || client.email;
             const name = client.leads.find(l => l.nome && l.nome !== 'Sem Nome')?.nome || client.nome;
             
-            const stableKey = email ? `email_${email.toLowerCase()}` : (phone ? `tel_${phone}` : `name_${name.toLowerCase()}`);
+            const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
 
             return {
               ...client,
