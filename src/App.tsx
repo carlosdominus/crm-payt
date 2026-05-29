@@ -1211,8 +1211,16 @@ export default function App() {
             let existing: Client | undefined;
             if (emailKey && emailMap.has(emailKey)) {
               existing = emailMap.get(emailKey);
-            } else if (!emailKey && phoneKey && phoneMap.has(phoneKey)) {
-              existing = phoneMap.get(phoneKey);
+            } else if (phoneKey && phoneMap.has(phoneKey)) {
+              const possibleExisting = phoneMap.get(phoneKey)!;
+              const existingEmail = possibleExisting.email?.toLowerCase().trim();
+              // Agrupa pelo telefone se:
+              // 1. O lead atual não tiver e-mail
+              // 2. O cliente já existente não tiver e-mail
+              // 3. Ou se ambos tiverem o mesmo e-mail
+              if (!emailKey || !existingEmail || emailKey === existingEmail) {
+                existing = possibleExisting;
+              }
             }
 
             if (existing) {
