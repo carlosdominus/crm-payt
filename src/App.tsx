@@ -163,7 +163,7 @@ export default function App() {
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
-  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string }>>({});
+  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [whatsappForm, setWhatsappForm] = useState({
@@ -847,7 +847,7 @@ export default function App() {
       setClientTags(prev => {
         const newTags = { ...prev };
         // First, incorporate all tags found in clientExtraData (potential legacy location)
-        Object.entries(clientExtraData).forEach(([key, data]) => {
+        (Object.entries(clientExtraData) as [string, { tag?: string }][]).forEach(([key, data]) => {
           if (data.tag && !newTags[key]) {
             newTags[key] = data.tag;
           }
@@ -1203,21 +1203,16 @@ export default function App() {
           const clientsList: Client[] = [];
           const emailMap = new Map<string, Client>();
           const phoneMap = new Map<string, Client>();
-          const nameMap = new Map<string, Client>();
           
           rawLeads.forEach(lead => {
             const emailKey = lead.email?.toLowerCase().trim();
             const phoneKey = lead.telefone?.trim();
-            const nameKey = lead.nome?.toLowerCase().trim();
             
             let existing: Client | undefined;
             if (emailKey && emailMap.has(emailKey)) {
               existing = emailMap.get(emailKey);
-            } else if (phoneKey && phoneMap.has(phoneKey)) {
+            } else if (!emailKey && phoneKey && phoneMap.has(phoneKey)) {
               existing = phoneMap.get(phoneKey);
-            } else if (nameKey && nameMap.has(nameKey) && nameKey !== 'sem nome') {
-              // Fallback to name merging if no email/phone match
-              existing = nameMap.get(nameKey);
             }
 
             if (existing) {
@@ -1243,7 +1238,6 @@ export default function App() {
 
               if (existing.nome === 'Sem Nome' && lead.nome !== 'Sem Nome') {
                 existing.nome = lead.nome;
-                if (nameKey) nameMap.set(nameKey, existing);
               }
               
               const leadValue = lead.numericValue;
@@ -1261,9 +1255,9 @@ export default function App() {
                 }
               }
             } else {
-              // Deterministic key: phone OR email OR name
+              // Deterministic key: email OR phone OR name
               // BUT we prefix it to avoid collisions between different types
-              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
+              const clientKey = lead.email ? `email_${lead.email.toLowerCase()}` : (lead.telefone ? `tel_${lead.telefone}` : `name_${lead.nome.toLowerCase()}`);
               
               const newClient: Client = {
                 email: lead.email,
@@ -1279,7 +1273,6 @@ export default function App() {
               clientsList.push(newClient);
               if (emailKey) emailMap.set(emailKey, newClient);
               if (phoneKey) phoneMap.set(phoneKey, newClient);
-              if (nameKey && nameKey !== 'sem nome') nameMap.set(nameKey, newClient);
             }
           });
 
@@ -1290,7 +1283,7 @@ export default function App() {
             const email = client.leads.find(l => l.email)?.email || client.email;
             const name = client.leads.find(l => l.nome && l.nome !== 'Sem Nome')?.nome || client.nome;
             
-            const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+            const stableKey = email ? `email_${email.toLowerCase()}` : (phone ? `tel_${phone}` : `name_${name.toLowerCase()}`);
 
             return {
               ...client,
