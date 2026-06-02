@@ -142,6 +142,37 @@ const isValidPhone = (phone: string): boolean => {
   return false;
 };
 
+const isNameless = (name?: string): boolean => {
+  if (!name) return true;
+  const lower = name.toLowerCase().trim();
+  return (
+    lower === 'sem nome' ||
+    lower === 'sua compra sem nome' ||
+    lower === '' ||
+    lower.startsWith('sua compra') ||
+    lower.includes('sem nome')
+  );
+};
+
+const getNameFromEmail = (email?: string): string => {
+  if (!email) return '';
+  const username = email.split('@')[0].toLowerCase();
+  
+  // Replace symbols like dots, underscores, hyphens, and numbers with spaces
+  let cleaned = username.replace(/[0-9._-]+/g, ' ').trim();
+  
+  // Split the word inside if it contains common Portuguese conjunctions (de, da, do, dos, das)
+  cleaned = cleaned.replace(/([a-zA-Z]+)(de|da|do|dos|das)([a-zA-Z]+)/ig, "$1 $2 $3");
+  
+  return cleaned
+    .split(/\s+/)
+    .map(word => {
+      if (['de', 'da', 'do', 'dos', 'das'].includes(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+};
+
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1244,7 +1275,7 @@ export default function App() {
                 emailMap.set(lead.email.toLowerCase().trim(), existing);
               }
 
-              if (existing.nome === 'Sem Nome' && lead.nome !== 'Sem Nome') {
+              if (isNameless(existing.nome) && !isNameless(lead.nome)) {
                 existing.nome = lead.nome;
               }
               
@@ -1283,18 +1314,26 @@ export default function App() {
               if (phoneKey) phoneMap.set(phoneKey, newClient);
             }
           });
-
+ 
           // Pass everything to setClients, auto-tagging is now derived
           const sortedClients = clientsList.map(client => {
             // Guarantee stable key based on the best available identifier after merging
             const phone = client.leads.find(l => l.telefone)?.telefone || client.telefone;
             const email = client.leads.find(l => l.email)?.email || client.email;
-            const name = client.leads.find(l => l.nome && l.nome !== 'Sem Nome')?.nome || client.nome;
+            let name = client.leads.find(l => l.nome && !isNameless(l.nome))?.nome || client.nome;
+            
+            if (isNameless(name) && email) {
+              const derivedName = getNameFromEmail(email);
+              if (derivedName) {
+                name = `${derivedName} (E-mail)`;
+              }
+            }
             
             const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
-
+ 
             return {
               ...client,
+              nome: name,
               key: stableKey,
               leads: client.leads.sort((a, b) => {
                 if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
