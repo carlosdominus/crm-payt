@@ -154,21 +154,202 @@ const isNameless = (name?: string): boolean => {
   );
 };
 
+const PT_NAMES = new Set([
+  // First names (unaccented, lowercase)
+  "joao", "jose", "maria", "ana", "pedro", "paulo", "lucas", "mateus", "marcos", 
+  "ricardo", "roberto", "edmilson", "edimilson", "edimar", "francisco", "antonio", "luiz", "luis",
+  "carlos", "marcelo", "roger", "rogerio", "cleano", "cleon", "claudio", "bruno", "felipe", 
+  "rafael", "thiago", "tiago", "rodrigo", "anderson", "andre", "fabricio", "fabio", 
+  "renato", "gabriel", "daniel", "gustavo", "fernando", "alexandre", "otavio", "juliana", "leticia", 
+  "beatriz", "camila", "amanda", "fernanda", "aline", "patricia", "patricio", "sandra", 
+  "regina", "solange", "oswaldo", "osvaldo", "valdir", "vitor", "victor", "walter", "valdemar", 
+  "sebastiao", "manoel", "manuel", "gilberto", "joselito", "jeferson", "jefferson", "jean", "jamil", 
+  "jackson", "ademir", "adriano", "alan", "alberto", "aldo", "alex", "alfredo", "alonso", "alvaro", 
+  "amadeu", "americo", "amilcar", "angelo", "ari", "arlindo", "armando", 
+  "arnaldo", "artur", "arthur", "ary", "augusto", "aurelio", "benito", "bento", "bernardo", "caio", 
+  "camilo", "celso", "cesar", "cicero", "clodoaldo", "cristiano", "darci", "darcio", "david", 
+  "deivid", "denis", "derek", "diego", "diogo", "dirceu", "ivaldo", "edilson", "edison", "edon", "edvaldo", 
+  "eduardo", "elias", "eliseu", "elizer", "elson", "elton", "emanoel", "emerson", "emilio", "enias", 
+  "enrique", "enzo", "erivaldo", "ernesto", "esdras", "estevao", "eurico", "evaldo", "everaldo", 
+  "everton", "expedito", "ezequiel", "fabiano", "fausto", "felicio", "feliphe", "felipi", "felix", 
+  "ferdinando", "filipe", "firmino", "flacio", "flavio", "genivaldo", "geraldo", "gerson", 
+  "giovane", "giovanni", "givaldo", "glauber", "gleison", "guilherme", "hamilton", "heitor", "helio", 
+  "henrique", "hercules", "hermes", "hugo", "ian", "igor", "isac", "isaac", "isaias", 
+  "ismael", "israel", "itamar", "valdo", "ivan", "ivanildo", "jailson", "jaime", "jair", "jandir", 
+  "januario", "jarbas", "jayme", "joaquim", "jobert", "jonas", "jonathan", "jorge", "josias", 
+  "josue", "juarez", "julio", "jurandir", "kleber", "laercio", "lauro", "lazaro", 
+  "leandro", "leonardo", "leone", "leopold", "leopoldo", "lineu", "luciano", "marcel", "marcio", 
+  "marco", "marcus", "mario", "marlon", "mauch", "mauricio", "mauro", "messias", "miguel", "milton", 
+  "moacir", "moises", "murilo", "natan", "natanael", "nelson", "nestor", "newton", "nicolas", "nilson", 
+  "nilton", "nivaldo", "odair", "orlando", "oscar", "osmar", "otoniel", "oziel", "pablo", 
+  "patrique", "patrick", "paulo", "pedro", "plinio", "queiroz", "raimundo", "ralf", "ralph", 
+  "ramon", "randal", "raphael", "reginaldo", "reinaldo", "renan", "renato", "rivaldo", 
+  "robson", "rodolfo", "ronald", "ronaldo", "ronildo", "ronny", "roni", "rony", "roque", "rubens", 
+  "rui", "ruy", "samuel", "sandro", "saulo", "sergio", "severino", "sidnei", "sidney", "silas", 
+  "silveira", "silvestre", "silvio", "tales", "tarcisio", "tasso", "taylor", "teo", "teodoro", 
+  "tito", "tomas", "tony", "ubirajara", "valdemir", "valdomiro", "vanderson", "vanderlei", 
+  "vanderley", "vasco", "vicente", "vinicius", "vagner", "wagner", "washington", "wellingthon", 
+  "wellington", "wendel", "wendell", "werner", "wesley", "william", "willian", "wilson", "yasmin", "yuri",
+
+  // Surnames (unaccented, lowercase)
+  "silva", "santos", "oliveira", "souza", "sousa", "ferreira", "alves", "pereira", "gomes", "ribeiro", 
+  "carvalho", "cardoso", "rodrigues", "martins", "costa", "lopes", "araujo", "melo", "barbosa", 
+  "pinto", "bezerra", "cavalcante", "magalhaes", "valentim", "damiao", "chagas", "cabral", 
+  "nascimento", "moreira", "cunha", "machado", "asis", "assis", "freire", "bernardo", "borges", "camargo", 
+  "castro", "dias", "duarte", "freitas", "guimaraes", "lima", "monteiro", "nunes", "pinheiro", 
+  "ramos", "rocha", "santana", "teixeira", "vieira", "passos", "marques", "xavier", "guedes", "farias", 
+  "mendes", "viana", "medeiros", "soares", "nogueira", "cruz", "brito", "neves", "fonseca", "furtado", 
+  "lins", "siqueira", "andrade", "antunes", "azevedo", "bandeira", "barros", "bastos", "batista", "bello", 
+  "belo", "bicalho", "braga", "brandao", "caetano", "caldeira", "campos", "carneiro", "coelho", "coimbra", 
+  "correia", "cortes", "cortez", "coutinho", "couto", "delgado", "domingues", "esteves", "fagundes", 
+  "faria", "feliciano", "fernandes", "ferrao", "figueiredo", "filho", "fontes", "fraga", "franco", 
+  "galvao", "garcia", "gonalves", "goncalves", "gouveia", "guerra", "henriques", "jesus", "jorge", 
+  "lacerda", "leal", "leite", "leme", "lobo", "maciel", "maia", "malta", "marinho", "mascarenhas", 
+  "mattos", "matos", "maximo", "meireles", "mello", "mendonca", "menezes", "mesquita", "miranda", 
+  "moraes", "morais", "mota", "motta", "moura", "netto", "neto", "nobre", "novais", "novaes", 
+  "ortiz", "pacheco", "paiva", "paixao", "paranhos", "paula", "pedrosa", "pedroso", "peixoto", "penha", 
+  "penteado", "pessoa", "pires", "porto", "prado", "ramalho", "rangel", "reis", "resende", "rezende", 
+  "rios", "sa", "salgado", "salles", "sales", "sampaio", "sanches", "saraiva", "seixas", "senna", 
+  "sena", "simao", "simoes", "sobrio", "sobral", "tavares", "teles", "theodoro", "toledo", "torres", 
+  "valente", "vales", "vargas", "vasconcelos", "vaz", "veiga", "vellozo", "veloso", "vilela", "villa", 
+  "vila", "zardo",
+
+  // Common descriptive words
+  "sucata", "mecanica", "mecanico", "comercio", "construcao", "vendas", "oficina", "pintor"
+]);
+
+const JUNK_WORDS = new Set(['ltda', 'tda', 'me', 'eireli', 'xp', 'online', 'sp', 'mg', 'br', 'com', 'adm', 'contato', 'web', 'site']);
+
+const segmentWord = (rawWord: string): string[] => {
+  const wordLower = rawWord.toLowerCase();
+  
+  // If the word itself is already in the dictionary or is very short, return as is
+  if (PT_NAMES.has(wordLower) || wordLower.length < 5) {
+    return [wordLower];
+  }
+  
+  const memo = new Map<number, { words: string[], score: number }>();
+  
+  const solve = (index: number): { words: string[], score: number } => {
+    if (index === wordLower.length) {
+      return { words: [], score: 0 };
+    }
+    if (memo.has(index)) {
+      return memo.get(index)!;
+    }
+    
+    let bestResult: { words: string[], score: number } | null = null;
+    
+    // We try to match a name from PT_NAMES starting at index, with length from 15 down to 3
+    for (let len = Math.min(15, wordLower.length - index); len >= 3; len--) {
+      const candidate = wordLower.substring(index, index + len);
+      if (PT_NAMES.has(candidate)) {
+        const next = solve(index + len);
+        const currentScore = len * len + next.score;
+        if (!bestResult || currentScore > bestResult.score) {
+          bestResult = {
+            words: [candidate, ...next.words],
+            score: currentScore
+          };
+        }
+      }
+    }
+    
+    // Also try common Portuguese conjunctions like 'de', 'da', 'do', 'e'
+    for (const conj of ['de', 'da', 'do', 'e']) {
+      if (wordLower.startsWith(conj, index)) {
+        const next = solve(index + conj.length);
+        const currentScore = conj.length * conj.length + next.score;
+        if (!bestResult || currentScore > bestResult.score) {
+          bestResult = {
+            words: [conj, ...next.words],
+            score: currentScore
+          };
+        }
+      }
+    }
+    
+    // Fallback: match 1 character as unmatched
+    {
+      const candidate = wordLower.substring(index, index + 1);
+      const next = solve(index + 1);
+      const currentScore = next.score; // 0 score for unmatched to maximize dictionary matches
+      if (!bestResult || currentScore >= bestResult.score) {
+        bestResult = {
+          words: [candidate, ...next.words],
+          score: currentScore
+        };
+      }
+    }
+    
+    memo.set(index, bestResult!);
+    return bestResult!;
+  };
+  
+  const rawSegments = solve(0).words;
+  
+  // Post-processing: merge contiguous unmatched blocks
+  const finalSegments: string[] = [];
+  let currentUnmatched = '';
+  
+  const isDict = (seg: string): boolean => {
+    return (PT_NAMES.has(seg) && seg.length >= 3) || ['de', 'da', 'do', 'e'].includes(seg);
+  };
+  
+  for (const seg of rawSegments) {
+    if (isDict(seg)) {
+      if (currentUnmatched) {
+        finalSegments.push(currentUnmatched);
+        currentUnmatched = '';
+      }
+      finalSegments.push(seg);
+    } else {
+      currentUnmatched += seg;
+    }
+  }
+  if (currentUnmatched) {
+    finalSegments.push(currentUnmatched);
+  }
+  
+  return finalSegments;
+};
+
 const getNameFromEmail = (email?: string): string => {
   if (!email) return '';
   const username = email.split('@')[0].toLowerCase();
   
   // Replace symbols like dots, underscores, hyphens, and numbers with spaces
-  let cleaned = username.replace(/[0-9._-]+/g, ' ').trim();
+  const cleaned = username.replace(/[0-9._-]+/g, ' ').trim();
+  const tokens = cleaned.split(/\s+/);
   
-  // Split the word inside if it contains common Portuguese conjunctions (de, da, do, dos, das)
-  cleaned = cleaned.replace(/([a-zA-Z]+)(de|da|do|dos|das)([a-zA-Z]+)/ig, "$1 $2 $3");
+  const allWords: string[] = [];
   
-  return cleaned
-    .split(/\s+/)
+  for (const token of tokens) {
+    if (!token) continue;
+    const pieces = segmentWord(token);
+    for (const piece of pieces) {
+      if (piece) {
+        allWords.push(piece);
+      }
+    }
+  }
+  
+  // Filter out known junk words
+  const filteredWords = allWords.filter(word => !JUNK_WORDS.has(word.toLowerCase()));
+  
+  // If we filtered out everything, fallback to the first word of the original cleaned string
+  if (filteredWords.length === 0) {
+    const firstToken = tokens[0];
+    return firstToken ? firstToken.charAt(0).toUpperCase() + firstToken.slice(1) : '';
+  }
+  
+  return filteredWords
     .map(word => {
-      if (['de', 'da', 'do', 'dos', 'das'].includes(word)) return word;
-      return word.charAt(0).toUpperCase() + word.slice(1);
+      const lower = word.toLowerCase();
+      if (['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower)) {
+        return lower;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(' ');
 };
