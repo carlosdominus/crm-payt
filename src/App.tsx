@@ -782,8 +782,8 @@ export default function App() {
   });
 
   // Filter states
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [tagFilter, setTagFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [showOnlyManualSales, setShowOnlyManualSales] = useState(false);
   const [showUtms, setShowUtms] = useState(false);
 
@@ -1668,8 +1668,13 @@ export default function App() {
         client.email.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
         client.telefone.includes(deferredSearchTerm);
       
-      const matchesStatus = statusFilter === 'all' || client.status === statusFilter;
-      const matchesTag = tagFilter === 'all' || (tagFilter === 'enviar msg' ? tag === null : tag === tagFilter);
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes('all') || statusFilter.includes(client.status);
+      const matchesTag = tagFilter.length === 0 || tagFilter.includes('all') || tagFilter.some(tf => {
+        if (tf === 'enviar_msg' || tf === 'enviar msg') {
+          return tag === null;
+        }
+        return tag === tf;
+      });
 
       let matchesDate = true;
       if (filterType !== 'all') {
@@ -2226,43 +2231,90 @@ export default function App() {
                       {/* Status */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Status da Planilha</p>
-                        <select 
-                          value={statusFilter}
-                          onChange={(e) => setStatusFilter(e.target.value)}
-                          className="w-full bg-white border border-modern-border rounded-none px-3 py-2 text-[11px] font-bold text-modern-text focus:outline-none"
-                        >
-                          <option value="all">Todos os Status</option>
-                          {uniqueStatuses.map(status => (
-                            <option key={status} value={status}>{status}</option>
-                          ))}
-                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => setStatusFilter([])}
+                            className={cn(
+                              "col-span-2 text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                              statusFilter.length === 0
+                                ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                            )}
+                          >
+                            Todos os Status {statusFilter.length > 0 ? `(${statusFilter.length} selecionados)` : "• Ativo"}
+                          </button>
+                          {uniqueStatuses.map(status => {
+                            const isSelected = statusFilter.includes(status);
+                            return (
+                              <button
+                                key={status}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setStatusFilter(prev => prev.filter(s => s !== status));
+                                  } else {
+                                    setStatusFilter(prev => [...prev, status]);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border truncate",
+                                  isSelected
+                                    ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                    : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                                )}
+                                title={status || 'Sem status'}
+                              >
+                                {status || 'Sem status'}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {/* Tags/Ações */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Ações / Tags</p>
                         <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => setTagFilter([])}
+                            className={cn(
+                              "col-span-2 text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                              tagFilter.length === 0
+                                ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                            )}
+                          >
+                            Todas {tagFilter.length > 0 ? `(${tagFilter.length} selecionadas)` : "• Ativa"}
+                          </button>
                           {[
-                            { id: 'all', label: 'Todas' },
+                            { id: 'enviar_msg', label: 'Enviar Msg' },
                             { id: 'reloginho', label: 'Reloginho' },
                             { id: 'contato_sucesso', label: 'Sucesso' },
                             { id: 'contato_falha', label: 'Falha' },
                             { id: 'vendido', label: 'Vendido' },
                             { id: 'lixo', label: 'Lixo' }
-                          ].map((item) => (
-                            <button
-                              key={item.id}
-                              onClick={() => setTagFilter(item.id)}
-                              className={cn(
-                                "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
-                                tagFilter === item.id 
-                                  ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary" 
-                                  : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
-                              )}
-                            >
-                              {item.label}
-                            </button>
-                          ))}
+                          ].map((item) => {
+                            const isSelected = tagFilter.includes(item.id);
+                            return (
+                              <button
+                                key={item.id}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setTagFilter(prev => prev.filter(t => t !== item.id));
+                                  } else {
+                                    setTagFilter(prev => [...prev, item.id]);
+                                  }
+                                }}
+                                className={cn(
+                                  "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                                  isSelected
+                                    ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                    : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                                )}
+                              >
+                                {item.label}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
 
