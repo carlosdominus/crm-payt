@@ -2276,9 +2276,13 @@ export default function App() {
                           <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
                             {client.telefone && (
                               <button 
-                                onClick={() => copyToClipboard(`${client.nome} - ${client.telefone}`)}
+                                onClick={() => {
+                                  const prod = lastLead?.produto || 'Sem produto';
+                                  const status = client.status || 'Sem status';
+                                  copyToClipboard(`${client.nome} - ${client.telefone} - ${prod} - ${status}`);
+                                }}
                                 className="w-6 h-6 rounded-none flex items-center justify-center transition-all border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                title="Copiar Nome + Tel"
+                                title="Copiar Nome + Tel + Produto + Status"
                               >
                                 <Copy size={12} />
                               </button>
