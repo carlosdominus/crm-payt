@@ -1496,9 +1496,61 @@ export default function App() {
             }
           });
  
-          // Pass everything to setClients, auto-tagging is now derived
-          const sortedClients = clientsList.map(client => {
-            // Guarantee stable key based on the best available identifier after merging
+          // Pass 2: Merge any clients that share the same non-empty phone or same non-empty email
+          const mergedClientsList: Client[] = [];
+          
+          clientsList.forEach(client => {
+            let existing: Client | undefined;
+            const emailKey = client.email?.toLowerCase().trim();
+            const phoneKey = client.telefone?.trim();
+            const isValPhone = phoneKey && isValidPhone(phoneKey);
+            
+            for (const other of mergedClientsList) {
+              const otherEmail = other.email?.toLowerCase().trim();
+              const otherPhone = other.telefone?.trim();
+              const isOtherValPhone = otherPhone && isValidPhone(otherPhone);
+              
+              if (emailKey && otherEmail && emailKey === otherEmail) {
+                existing = other;
+                break;
+              }
+              if (isValPhone && isOtherValPhone && phoneKey === otherPhone) {
+                if (!emailKey || !otherEmail || emailKey === otherEmail) {
+                  existing = other;
+                  break;
+                }
+              }
+            }
+            
+            if (existing) {
+              existing.leads = [...existing.leads, ...client.leads];
+              if (!existing.email && client.email) {
+                existing.email = client.email;
+              }
+              if ((!existing.telefone || !isValidPhone(existing.telefone)) && client.telefone) {
+                existing.telefone = client.telefone;
+              }
+              if (isNameless(existing.nome) && !isNameless(client.nome)) {
+                existing.nome = client.nome;
+              }
+              existing.totalSpent += client.totalSpent;
+              if (client.lastPurchaseTimestamp > existing.lastPurchaseTimestamp) {
+                existing.lastPurchaseDate = client.lastPurchaseDate;
+                existing.lastPurchaseTimestamp = client.lastPurchaseTimestamp;
+                if (existing.status !== 'Aprovado') {
+                  existing.status = client.status;
+                }
+              }
+              if (client.status === 'Aprovado') {
+                existing.status = 'Aprovado';
+              }
+            } else {
+              mergedClientsList.push(client);
+            }
+          });
+
+          const seenKeys = new Set<string>();
+          const sortedClients = mergedClientsList.map(client => {
             const phone = client.leads.find(l => l.telefone)?.telefone || client.telefone;
             const email = client.leads.find(l => l.email)?.email || client.email;
             let name = client.leads.find(l => l.nome && !isNameless(l.nome))?.nome || client.nome;
@@ -1510,7 +1562,16 @@ export default function App() {
               }
             }
             
-            const stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+            let stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+            
+            if (seenKeys.has(stableKey)) {
+              let suffix = 1;
+              while (seenKeys.has(`${stableKey}_${suffix}`)) {
+                suffix++;
+              }
+              stableKey = `${stableKey}_${suffix}`;
+            }
+            seenKeys.add(stableKey);
  
             return {
               ...client,
