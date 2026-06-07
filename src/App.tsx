@@ -436,6 +436,52 @@ const cleanCustomerName = (name: string, email?: string): string => {
   return trimmed;
 };
 
+const determineActiveStatus = (leads: Lead[]): string => {
+  if (!leads || leads.length === 0) return 'Sem status';
+  
+  const sorted = [...leads].sort((a, b) => b.timestamp - a.timestamp);
+  const mostRecent = sorted[0];
+  
+  if (sorted.length === 1) return mostRecent.status;
+  
+  // Find leads belonging to the SAME checkout session as the most recent checkout:
+  // - Same non-empty codPay, OR
+  // - Same product name AND timeframe <= 2 hours (7200000 ms)
+  const sessionLeads = sorted.filter(l => {
+    if (mostRecent.codPay && l.codPay && mostRecent.codPay === l.codPay) {
+      return true;
+    }
+    const isSameProduct = mostRecent.produto && l.produto && mostRecent.produto.toLowerCase().trim() === l.produto.toLowerCase().trim();
+    const isCloseInTime = Math.abs(mostRecent.timestamp - l.timestamp) <= 7200000;
+    return isSameProduct && isCloseInTime;
+  });
+  
+  // Status priority (higher priority wins within the same checkout session)
+  const statusPriority: Record<string, number> = {
+    'Aprovado': 100,
+    'Reembolsado': 90,
+    'Cancelado': 80,
+    'Recusado': 80,
+    'Pendente': 70,
+    'Expirado': 50,
+    'Carrinho Abandonado': 40,
+    'Lixo': 10,
+  };
+  
+  let bestLead = mostRecent;
+  let maxPriority = statusPriority[mostRecent.status] || 0;
+  
+  for (const lead of sessionLeads) {
+    const priority = statusPriority[lead.status] || 0;
+    if (priority > maxPriority) {
+      maxPriority = priority;
+      bestLead = lead;
+    }
+  }
+  
+  return bestLead.status;
+};
+
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [top10Copied, setTop10Copied] = useState(false);
@@ -1578,15 +1624,12 @@ export default function App() {
               const isAprovado = lead.status === 'Aprovado';
               if (isAprovado) {
                 existing.totalSpent += leadValue;
-                existing.status = 'Aprovado';
               }
               
               if (lead.timestamp > existing.lastPurchaseTimestamp) {
                 existing.lastPurchaseDate = lead.data;
                 existing.lastPurchaseTimestamp = lead.timestamp;
-                if (existing.status !== 'Aprovado') {
-                  existing.status = lead.status;
-                }
+                existing.status = lead.status;
               }
             } else {
               // Deterministic key: phone OR email OR name
@@ -1651,12 +1694,7 @@ export default function App() {
               if (client.lastPurchaseTimestamp > existing.lastPurchaseTimestamp) {
                 existing.lastPurchaseDate = client.lastPurchaseDate;
                 existing.lastPurchaseTimestamp = client.lastPurchaseTimestamp;
-                if (existing.status !== 'Aprovado') {
-                  existing.status = client.status;
-                }
-              }
-              if (client.status === 'Aprovado') {
-                existing.status = 'Aprovado';
+                existing.status = client.status;
               }
             } else {
               mergedClientsList.push(client);
@@ -1689,16 +1727,17 @@ export default function App() {
             }
             seenKeys.add(stableKey);
  
+            const sortedLeads = client.leads.sort((a, b) => {
+              return b.timestamp - a.timestamp;
+            });
+            const computedStatus = determineActiveStatus(sortedLeads);
+ 
             return {
               ...client,
               nome: name,
               key: stableKey,
-              leads: client.leads.sort((a, b) => {
-                if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
-                if (b.status === 'Aprovado' && a.status !== 'Aprovado') return 1;
-                if (a.status === 'Aprovado' && b.status !== 'Aprovado') return -1;
-                return 0;
-              })
+              status: computedStatus,
+              leads: sortedLeads
             };
           }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
 
@@ -1742,11 +1781,7 @@ export default function App() {
       const manualSpent = clientManualSales.reduce((sum, s) => sum + s.value, 0);
       const totalSpent = client.totalSpent + manualSpent;
       
-      // Prioritize "Aprovado" status if there are any sales (manual or leads)
       let status = client.status;
-      if (totalSpent > 0 && status !== 'Aprovado') {
-        status = 'Aprovado';
-      }
 
       return {
         ...client,
@@ -2748,9 +2783,23 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-3 py-1 border-b border-r border-[#dadce0]">
-                          <p className="text-xs font-normal text-[#5f6368] truncate max-w-[180px]">
-                            {client.email}
-                          </p>
+                          <div className="flex items-center justify-between group/email">
+                            <p className="text-xs font-normal text-[#5f6368] truncate max-w-[140px]">
+                              {client.email || <span className="text-rose-400 italic text-[9px]">Sem e-mail</span>}
+                            </p>
+                            {client.email && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyToClipboard(client.email);
+                                }}
+                                className="opacity-0 group-hover/email:opacity-100 p-1 hover:bg-gray-200 rounded-md transition-all text-[#5f6368] shrink-0"
+                                title="Copiar e-mail"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex flex-col">
