@@ -154,6 +154,71 @@ const isNameless = (name?: string): boolean => {
   );
 };
 
+const playNotificationSound = (type: 'approved' | 'other') => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    
+    if (type === 'approved') {
+      // Beautiful uplifting ascending chime
+      const now = ctx.currentTime;
+      
+      // Note 1 - C5
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(523.25, now);
+      gain1.gain.setValueAtTime(0.12, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.3);
+      
+      // Note 2 - E5
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659.25, now + 0.08);
+      gain2.gain.setValueAtTime(0.12, now + 0.08);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.08);
+      osc2.stop(now + 0.38);
+
+      // Note 3 - G5
+      const osc3 = ctx.createOscillator();
+      const gain3 = ctx.createGain();
+      osc3.type = 'sine';
+      osc3.frequency.setValueAtTime(783.99, now + 0.16);
+      gain3.gain.setValueAtTime(0.12, now + 0.16);
+      gain3.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
+      osc3.connect(gain3);
+      gain3.connect(ctx.destination);
+      osc3.start(now + 0.16);
+      osc3.stop(now + 0.46);
+    } else {
+      // Clean, polite notification blip (A4 -> E4 sliding)
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(330, now + 0.12);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+  } catch (e) {
+    console.error("Erro ao reproduzir som de notificação:", e);
+  }
+};
+
 const PT_NAMES = new Set([
   // First names (unaccented, lowercase)
   "joao", "jose", "maria", "ana", "pedro", "paulo", "lucas", "mateus", "marcos", 
@@ -175,7 +240,7 @@ const PT_NAMES = new Set([
   "ferdinando", "filipe", "firmino", "flacio", "flavio", "genivaldo", "geraldo", "gerson", 
   "giovane", "giovanni", "givaldo", "glauber", "gleison", "guilherme", "hamilton", "heitor", "helio", 
   "henrique", "hercules", "hermes", "hugo", "ian", "igor", "isac", "isaac", "isaias", 
-  "ismael", "israel", "itamar", "valdo", "ivan", "ivanildo", "jailson", "jaime", "jair", "jandir", 
+  "ismael", "israel", "itamar", "valdo", "ivan", "ivanildo", "jailson", "jaelson", "jaime", "jair", "jandir", 
   "januario", "jarbas", "jayme", "joaquim", "jobert", "jonas", "jonathan", "jorge", "josias", 
   "josue", "juarez", "julio", "jurandir", "kleber", "laercio", "lauro", "lazaro", 
   "leandro", "leonardo", "leone", "leopold", "leopoldo", "lineu", "luciano", "marcel", "marcio", 
@@ -190,6 +255,7 @@ const PT_NAMES = new Set([
   "tito", "tomas", "tony", "ubirajara", "valdemir", "valdomiro", "vanderson", "vanderlei", 
   "vanderley", "vasco", "vicente", "vinicius", "vagner", "wagner", "washington", "wellingthon", 
   "wellington", "wendel", "wendell", "werner", "wesley", "william", "willian", "wilson", "yasmin", "yuri",
+  "eliano", "delaceli",
 
   // Surnames (unaccented, lowercase)
   "silva", "santos", "oliveira", "souza", "sousa", "ferreira", "alves", "pereira", "gomes", "ribeiro", 
@@ -356,6 +422,8 @@ const getNameFromEmail = (email?: string): string => {
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [top10Copied, setTop10Copied] = useState(false);
+  const seenLeadIdsRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1382,8 +1450,16 @@ export default function App() {
             const paymentMethodStr = row['tipo de pagamento'] || '';
             const checkoutUrlFromV = vHeader ? (row[vHeader] || '').toString().trim() : '';
 
+            const rowEmail = emailRaw.toLowerCase().trim();
+            const rowPhone = cleanedTelefone;
+            const rowCodPay = (row['cod pay'] || '').toString().trim();
+            const rowProd = productFromE || (row['produto'] || '').trim();
+            const rowVal = isNaN(leadValue) ? '0' : leadValue.toString();
+            const fallbackId = `row_${index + 2}_${dateStr}_${timeStr}_${rowPhone}_${rowEmail}_${rowCodPay}_${rowVal}_${rowProd}`;
+            const finalId = row['id'] ? row['id'].toString().trim() : fallbackId;
+
             return {
-              id: row['id'] || Math.random().toString(36).substr(2, 9),
+              id: finalId,
               nome: (row['nome'] || 'Sem Nome').trim(),
               telefone: cleanedTelefone,
               email: emailRaw,
@@ -1411,6 +1487,28 @@ export default function App() {
               tags: (row['tags'] || '').trim()
             };
           });
+
+          // Detect new leads and play notification sounds
+          const isInitialLoad = seenLeadIdsRef.current.size === 0;
+          const newLeads: Lead[] = [];
+          
+          rawLeads.forEach(lead => {
+            if (!seenLeadIdsRef.current.has(lead.id)) {
+              if (!isInitialLoad) {
+                newLeads.push(lead);
+              }
+              seenLeadIdsRef.current.add(lead.id);
+            }
+          });
+
+          if (newLeads.length > 0) {
+            const hasApproved = newLeads.some(l => l.status === 'Aprovado');
+            if (hasApproved) {
+              playNotificationSound('approved');
+            } else {
+              playNotificationSound('other');
+            }
+          }
 
           const clientsList: Client[] = [];
           const emailMap = new Map<string, Client>();
@@ -1558,7 +1656,7 @@ export default function App() {
             if (isNameless(name) && email) {
               const derivedName = getNameFromEmail(email);
               if (derivedName) {
-                name = `${derivedName} (E-mail)`;
+                name = derivedName;
               }
             }
             
@@ -1605,6 +1703,11 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
+    // Background auto-refresh interval: fetch silently every 15 seconds
+    const intervalId = setInterval(() => {
+      fetchData();
+    }, 15000);
+    return () => clearInterval(intervalId);
   }, []);
 
   const enrichedClients = useMemo(() => {
@@ -1918,6 +2021,22 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const copyTop10Clients = () => {
+    const top10 = filteredClients.slice(0, 10);
+    if (top10.length === 0) return;
+    
+    const textToCopy = top10.map(client => {
+      const lastLead = client.leads[0];
+      const prod = lastLead?.produto || 'Sem produto';
+      const status = client.status || 'Sem status';
+      return `${client.nome} - ${client.telefone} - ${prod} - ${status}`;
+    }).join('\n');
+    
+    navigator.clipboard.writeText(textToCopy);
+    setTop10Copied(true);
+    setTimeout(() => setTop10Copied(false), 2000);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-modern-bg font-sans">
       {/* Main Content */}
@@ -1925,7 +2044,7 @@ export default function App() {
         {/* Header - Simple Style */}
         <header className="h-20 px-10 glass-header flex items-center justify-between shrink-0 z-10">
           <div className="flex items-center gap-6">
-            <div className="w-10 h-10 bg-modern-primary rounded-none flex items-center justify-center text-white shadow-lg shadow-modern-primary/20">
+            <div className="w-10 h-10 bg-modern-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-modern-primary/20">
               <Package size={20} />
             </div>
             <div className="flex items-center gap-4">
@@ -1934,7 +2053,7 @@ export default function App() {
               <p className="text-xs font-semibold text-modern-secondary">Controle de Leads</p>
             </div>
             {effectiveOwnerEmail && user && effectiveOwnerEmail !== user.email && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-tighter">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-tighter rounded-md">
                 <Users size={12} className="text-emerald-500" />
                 Dono: {effectiveOwnerEmail.split('@')[0]}
               </div>
@@ -1943,7 +2062,7 @@ export default function App() {
               <button 
                 onClick={() => setShowOnlyManualSales(!showOnlyManualSales)}
                 className={cn(
-                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border transition-all",
+                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border transition-all rounded-md",
                   showOnlyManualSales 
                     ? "bg-emerald-600 border-emerald-600 text-white" 
                     : "bg-white border-modern-border text-modern-secondary hover:border-modern-primary"
@@ -1979,7 +2098,7 @@ export default function App() {
                <button 
                 onClick={() => setView(view === 'followup' ? 'crm' : 'followup')}
                 className={cn(
-                  "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
+                  "w-10 h-10 border border-modern-border rounded-lg flex items-center justify-center transition-all shadow-sm",
                   view === 'followup' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
                 )}
                 title="Ver Follow-up"
@@ -1989,7 +2108,7 @@ export default function App() {
               <button 
                 onClick={() => setView(view === 'dashboard' ? 'crm' : 'dashboard')}
                 className={cn(
-                  "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
+                  "w-10 h-10 border border-modern-border rounded-lg flex items-center justify-center transition-all shadow-sm",
                   view === 'dashboard' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
                 )}
                 title={view === 'dashboard' ? "Ver CRM" : "Ver Dashboard"}
@@ -1998,14 +2117,14 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setShowSettings(true)}
-                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all shadow-sm"
+                className="w-10 h-10 bg-white border border-modern-border rounded-lg flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all shadow-sm"
                 title="Configurações de Sincronização"
               >
                 <Settings size={18} />
               </button>
               <button 
                 onClick={() => setShowWhatsappManager(true)}
-                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-emerald-600 transition-all shadow-sm"
+                className="w-10 h-10 bg-white border border-modern-border rounded-lg flex items-center justify-center text-modern-secondary hover:text-emerald-600 transition-all shadow-sm"
                 title="Gerenciar WhatsApps"
               >
                 <Phone size={18} />
@@ -2013,7 +2132,7 @@ export default function App() {
               <button 
                 onClick={fetchData}
                 disabled={refreshing}
-                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm"
+                className="w-10 h-10 bg-white border border-modern-border rounded-lg flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm"
               >
                 <RefreshCw size={18} strokeWidth={2.5} className={cn(refreshing && "animate-spin")} />
               </button>
@@ -2149,14 +2268,14 @@ export default function App() {
               placeholder="Pesquisar clientes..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 bg-white border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-4 focus:ring-modern-primary/5 transition-all placeholder:text-modern-secondary/40 shadow-sm"
+              className="w-full pl-12 pr-4 py-3.5 bg-white border border-modern-border rounded-xl text-sm font-medium focus:outline-none focus:ring-4 focus:ring-modern-primary/5 transition-all placeholder:text-modern-secondary/40 shadow-sm"
             />
           </div>
 
                       <div className="relative z-[60]">
                         <button 
                           onClick={() => setShowFilterMenu(!showFilterMenu)}
-                          className="flex items-center gap-3 bg-white border border-modern-border rounded-none px-5 py-3 shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-modern-text"
+                          className="flex items-center gap-3 bg-white border border-modern-border rounded-lg px-5 py-3 shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-modern-text"
                         >
                           <Filter size={18} className="text-modern-secondary" />
                           <span>Filtros</span>
@@ -2177,7 +2296,7 @@ export default function App() {
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                className="absolute right-0 mt-3 w-80 bg-white border border-modern-border rounded-none shadow-2xl z-[70] overflow-hidden p-4 space-y-6"
+                                className="absolute right-0 mt-3 w-80 bg-white border border-modern-border rounded-xl shadow-2xl z-[70] overflow-hidden p-4 space-y-6"
                               >
                       {/* Período */}
                       <div className="space-y-2">
@@ -2194,7 +2313,7 @@ export default function App() {
                               key={item.id}
                               onClick={() => setFilterType(item.id as any)}
                               className={cn(
-                                "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                                "text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
                                 filterType === item.id 
                                   ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary" 
                                   : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
@@ -2205,14 +2324,14 @@ export default function App() {
                           ))}
                         </div>
                         {filterType === 'custom' && (
-                          <div className="mt-2 p-3 bg-slate-50 border border-modern-border space-y-3">
+                          <div className="mt-2 p-3 bg-slate-50 border border-modern-border rounded-lg space-y-3">
                             <div className="space-y-1">
                               <p className="text-[9px] font-bold uppercase text-modern-secondary">Início</p>
                               <input 
                                 type="date" 
                                 value={customStartDate}
                                 onChange={(e) => setCustomStartDate(e.target.value)}
-                                className="w-full bg-white border border-modern-border rounded-none px-2 py-1.5 text-[11px] font-bold text-modern-text focus:outline-none"
+                                className="w-full bg-white border border-modern-border rounded-md px-2 py-1.5 text-[11px] font-bold text-modern-text focus:outline-none"
                               />
                             </div>
                             <div className="space-y-1">
@@ -2221,7 +2340,7 @@ export default function App() {
                                 type="date" 
                                 value={customEndDate}
                                 onChange={(e) => setCustomEndDate(e.target.value)}
-                                className="w-full bg-white border border-modern-border rounded-none px-2 py-1.5 text-[11px] font-bold text-modern-text focus:outline-none"
+                                className="w-full bg-white border border-modern-border rounded-md px-2 py-1.5 text-[11px] font-bold text-modern-text focus:outline-none"
                               />
                             </div>
                           </div>
@@ -2235,7 +2354,7 @@ export default function App() {
                           <button
                             onClick={() => setStatusFilter([])}
                             className={cn(
-                              "col-span-2 text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                              "col-span-2 text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
                               statusFilter.length === 0
                                 ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
                                 : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
@@ -2256,7 +2375,7 @@ export default function App() {
                                   }
                                 }}
                                 className={cn(
-                                  "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border truncate",
+                                  "text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border truncate",
                                   isSelected
                                     ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
                                     : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
@@ -2277,7 +2396,7 @@ export default function App() {
                           <button
                             onClick={() => setTagFilter([])}
                             className={cn(
-                              "col-span-2 text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                              "col-span-2 text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
                               tagFilter.length === 0
                                 ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
                                 : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
@@ -2305,7 +2424,7 @@ export default function App() {
                                   }
                                 }}
                                 className={cn(
-                                  "text-left px-3 py-2 rounded-none text-[11px] font-bold transition-colors border",
+                                  "text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
                                   isSelected
                                     ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
                                     : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
@@ -2320,7 +2439,7 @@ export default function App() {
 
                       <button 
                         onClick={() => setShowFilterMenu(false)}
-                        className="w-full bg-modern-text text-white py-2.5 font-bold text-[11px] hover:bg-modern-text/90 transition-all"
+                        className="w-full bg-modern-text text-white py-2.5 font-bold text-[11px] hover:bg-modern-text/90 transition-all rounded-md"
                       >
                         Fechar Filtros
                       </button>
@@ -2330,15 +2449,39 @@ export default function App() {
               </AnimatePresence>
             </div>
 
+            <button 
+              onClick={copyTop10Clients}
+              disabled={filteredClients.length === 0}
+              className={cn(
+                "flex items-center gap-2 border rounded-lg px-5 py-3 shadow-sm transition-colors text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed",
+                top10Copied 
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700" 
+                  : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+              )}
+              title="Copiar as 10 primeiras linhas de clientes aparecendo"
+            >
+              {top10Copied ? (
+                <>
+                  <CheckCircle2 size={18} className="text-emerald-600 animate-pulse" />
+                  <span>Copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={18} className="text-modern-secondary" />
+                  <span>Copiar 10 Clientes</span>
+                </>
+              )}
+            </button>
+
           <div className="flex-1" />
-          <p className="text-xs font-bold text-modern-secondary bg-white px-4 py-2 rounded-none border border-modern-border shadow-sm">
+          <p className="text-xs font-bold text-modern-secondary bg-white px-4 py-2 rounded-lg border border-modern-border shadow-sm">
             {filteredClients.length} resultados
           </p>
         </div>
 
         {/* Spreadsheet Area */}
         <div className="flex-1 overflow-hidden px-10 pb-10 flex flex-col">
-          <div className="bg-white rounded-none border border-modern-border shadow-sm overflow-hidden flex flex-col flex-1">
+          <div className="bg-white rounded-xl border border-modern-border shadow-sm overflow-hidden flex flex-col flex-1">
             <div 
               ref={tableContainerRef}
               onScroll={handleScroll}
@@ -2347,22 +2490,22 @@ export default function App() {
               <table className="w-full text-left border-separate border-spacing-0 bg-white">
                 <thead>
                   <tr className="bg-[#f8f9fa]">
-                    <th className="sticky top-0 z-20 px-2 py-2 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-12">Zap</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Data/Hora</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Status Atual</th>
-                    <th className="sticky top-0 z-20 px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] bg-[#f8f9fa]">Produto</th>
+                    <th className="sticky top-0 z-20 px-2 py-1 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-12">Zap</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Data/Hora</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Status Atual</th>
+                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] bg-[#f8f9fa]">Produto</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
                   {loading ? (
                     Array.from({ length: 20 }).map((_, i) => (
                       <tr key={i} className="animate-pulse">
-                        <td colSpan={8} className="px-3 py-2 h-10 border-b border-[#dadce0]" />
+                        <td colSpan={8} className="px-3 py-1 h-7 border-b border-[#dadce0]" />
                       </tr>
                     ))
                   ) : pagedClients.map((client, idx) => {
@@ -2382,10 +2525,10 @@ export default function App() {
                         initial={false}
                         animate={{ opacity: 1 }}
                       >
-                        <td className="px-2 py-2 border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center text-[10px] text-[#5f6368] font-medium">
+                        <td className="px-2 py-1 border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center text-[10px] text-[#5f6368] font-medium">
                           {lastLead?.rowNumber || '-'}
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
                             {client.telefone && (
                               <button 
@@ -2394,7 +2537,7 @@ export default function App() {
                                   const status = client.status || 'Sem status';
                                   copyToClipboard(`${client.nome} - ${client.telefone} - ${prod} - ${status}`);
                                 }}
-                                className="w-6 h-6 rounded-none flex items-center justify-center transition-all border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                className="w-6 h-6 rounded-md flex items-center justify-center transition-all border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
                                 title="Copiar Nome + Tel + Produto + Status"
                               >
                                 <Copy size={12} />
@@ -2403,7 +2546,7 @@ export default function App() {
                             <button 
                               onClick={() => toggleTag(clientKey, 'reloginho')}
                               className={cn(
-                                "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
+                                "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
                                 currentTag === 'reloginho' 
                                   ? "bg-amber-100 border-amber-200 text-amber-600" 
                                   : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
@@ -2417,7 +2560,7 @@ export default function App() {
                             <div className="relative group/tagmenu" onClick={(e) => e.stopPropagation()}>
                               <button 
                                 className={cn(
-                                  "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
+                                  "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
                                   ['contato_sucesso', 'contato_falha', 'vendido'].includes(currentTag as string)
                                     ? "bg-modern-primary border-modern-primary text-white" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
@@ -2426,11 +2569,11 @@ export default function App() {
                                 <Plus size={12} />
                               </button>
                               
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/tagmenu:flex bg-white border border-modern-border shadow-xl z-50 p-1 gap-1">
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/tagmenu:flex bg-white border border-modern-border shadow-xl z-50 p-1 gap-1 rounded-lg">
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_sucesso'); }}
                                   className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
                                     currentTag === 'contato_sucesso' 
                                       ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
                                       : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
@@ -2442,7 +2585,7 @@ export default function App() {
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_falha'); }}
                                   className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
                                     currentTag === 'contato_falha' 
                                       ? "bg-gray-100 border-gray-300 text-gray-800" 
                                       : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
@@ -2454,7 +2597,7 @@ export default function App() {
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'vendido'); }}
                                   className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border",
+                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
                                     currentTag === 'vendido' 
                                       ? "bg-emerald-500 border-emerald-600 text-white" 
                                       : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
@@ -2468,7 +2611,7 @@ export default function App() {
                             <button 
                               onClick={() => toggleTag(clientKey, 'lixo')}
                               className={cn(
-                                "w-6 h-6 rounded-none flex items-center justify-center transition-all border",
+                                "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
                                 currentTag === 'lixo' 
                                   ? "bg-rose-100 border-rose-200 text-rose-600" 
                                   : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
@@ -2479,13 +2622,13 @@ export default function App() {
                             </button>
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0] overflow-visible">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0] overflow-visible">
                           <div className="flex items-center justify-center">
                             <div className="relative group/zap" onClick={(e) => e.stopPropagation()}>
                               <button 
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
-                                  "w-7 h-7 rounded-none flex items-center justify-center transition-all border shadow-sm",
+                                  "w-6 h-6 rounded-md flex items-center justify-center transition-all border shadow-sm",
                                   (client.assignedWhatsappId && assignedAcc)
                                     ? "text-white" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
@@ -2493,14 +2636,14 @@ export default function App() {
                                 style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
-                                  <span className="text-[11px] font-black">{assignedAcc.identifier}</span>
+                                  <span className="text-[9px] font-black">{assignedAcc.identifier}</span>
                                 ) : (
-                                  <Phone size={14} />
+                                  <Phone size={11} />
                                 )}
                               </button>
                               
                               <div className={cn(
-                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-none",
+                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
                                 idx < 10 ? "top-full mt-2" : "bottom-full mb-2"
                               )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
@@ -2564,30 +2707,30 @@ export default function App() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-none bg-modern-primary/10 flex items-center justify-center text-modern-primary font-bold text-[10px] shrink-0">
+                            <div className="w-5 h-5 rounded-md bg-modern-primary/10 flex items-center justify-center text-modern-primary font-bold text-[9px] shrink-0">
                               {client.nome.charAt(0)}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-normal text-[#202124] truncate">{client.nome}</p>
+                              <p className="text-xs font-normal text-[#202124] truncate">{client.nome}</p>
                             </div>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 copyToClipboard(client.nome);
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded-none transition-all text-[#5f6368]"
+                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded-md transition-all text-[#5f6368]"
                               title="Copiar nome"
                             >
-                              <Copy size={12} />
+                              <Copy size={11} />
                             </button>
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center justify-between group/phone">
-                            <p className="text-sm font-normal text-[#3c4043] flex items-center gap-2">
-                              <Phone size={12} className="text-[#5f6368]" /> {client.telefone || <span className="text-rose-400 italic text-[10px]">Sem número</span>}
+                            <p className="text-xs font-normal text-[#3c4043] flex items-center gap-1.5">
+                              <Phone size={11} className="text-[#5f6368]" /> {client.telefone || <span className="text-rose-400 italic text-[9px]">Sem número</span>}
                             </p>
                             {client.telefone && (
                               <button
@@ -2595,36 +2738,36 @@ export default function App() {
                                   e.stopPropagation();
                                   copyToClipboard(client.telefone);
                                 }}
-                                className="opacity-0 group-hover/phone:opacity-100 p-1 hover:bg-gray-200 rounded-none transition-all text-[#5f6368]"
+                                className="opacity-0 group-hover/phone:opacity-100 p-1 hover:bg-gray-200 rounded-md transition-all text-[#5f6368]"
                                 title="Copiar telefone"
                               >
-                                <Copy size={12} />
+                                <Copy size={11} />
                               </button>
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
-                          <p className="text-sm font-normal text-[#5f6368] truncate max-w-[180px]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
+                          <p className="text-xs font-normal text-[#5f6368] truncate max-w-[180px]">
                             {client.email}
                           </p>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex flex-col">
-                            <p className="text-sm font-normal text-[#202124]">{lastLead?.data}</p>
-                            <p className="text-[10px] text-[#5f6368]">{lastLead?.hora}</p>
+                            <p className="text-xs font-normal text-[#202124]">{lastLead?.data}</p>
+                            <p className="text-[9px] text-[#5f6368]">{lastLead?.hora}</p>
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center gap-2">
                             <div className={cn(
-                              "px-1.5 py-0.5 rounded-none text-[10px] font-medium uppercase tracking-wider",
+                              "px-1.5 py-0.5 rounded-md text-[9px] font-medium uppercase tracking-wider",
                               STATUS_THEMES[client.status]?.bg || "bg-slate-100",
                               STATUS_THEMES[client.status]?.text || "text-slate-500"
                             )}>
                               {client.status}
                             </div>
                             <div className={cn(
-                              "px-2 py-0.5 rounded-none text-[9px] font-black uppercase shadow-sm flex items-center justify-center",
+                              "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center",
                               !currentTag ? "bg-[#DBEAFE] text-blue-700" :
                               (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
                               (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700" :
@@ -2640,15 +2783,15 @@ export default function App() {
                                'Status'}
                             </div>
                             {lastLead?.tags && (
-                              <div className="px-1.5 py-0.5 rounded-none bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
+                              <div className="px-1.5 py-0.5 rounded-[4px] bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
                                 {lastLead.tags}
                               </div>
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-2 border-b border-[#dadce0]">
+                        <td className="px-3 py-1 border-b border-[#dadce0]">
                           <div className="flex flex-col">
-                            <p className="text-sm font-semibold text-[#202124] truncate max-w-[200px]">
+                            <p className="text-xs font-semibold text-[#202124] truncate max-w-[200px]">
                               {lastLead?.produto || '-'}
                             </p>
                           </div>
@@ -3229,14 +3372,14 @@ export default function App() {
                 <div className="mb-12 border-b border-modern-border pb-12">
                   <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-emerald-100 rounded-none flex items-center justify-center text-emerald-600">
+                      <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600">
                         <DollarSign size={18} />
                       </div>
                       <h4 className="text-xs font-extrabold uppercase tracking-[0.15em] text-modern-text">Vendas Diretas (WhatsApp)</h4>
                     </div>
                     <button 
                       onClick={() => setShowAddSaleModal(true)}
-                      className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 text-[11px] font-bold hover:bg-emerald-700 transition-all shadow-sm"
+                      className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 text-[11px] font-bold hover:bg-emerald-700 transition-all shadow-sm rounded-lg"
                     >
                       <Plus size={16} /> Registrar Venda
                     </button>
@@ -3247,7 +3390,7 @@ export default function App() {
                       [...currentSelectedClient.manualSales]
                         .sort((a, b) => b.timestamp - a.timestamp)
                         .map(sale => (
-                          <div key={sale.id} className="bg-slate-50 border border-modern-border p-5 flex items-center justify-between group/sale">
+                          <div key={sale.id} className="bg-slate-50 border border-modern-border p-5 flex items-center justify-between group/sale rounded-xl">
                             <div>
                               <p className="text-sm font-bold text-modern-text">{sale.productName}</p>
                               <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-wider">
@@ -3269,14 +3412,14 @@ export default function App() {
                               <div className="flex flex-col opacity-0 group-hover/sale:opacity-100 transition-all">
                                 <button 
                                   onClick={() => handleEditSale(sale)}
-                                  className="p-1.5 text-modern-secondary hover:text-emerald-600 hover:bg-emerald-50 transition-all"
+                                  className="p-1.5 text-modern-secondary hover:text-emerald-600 hover:bg-emerald-50 transition-all rounded-md"
                                   title="Editar Venda"
                                 >
                                   <Edit size={14} />
                                 </button>
                                 <button 
                                   onClick={() => handleDeleteSale(sale.id)}
-                                  className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                                  className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-all rounded-md"
                                   title="Excluir Venda"
                                 >
                                   <Trash2 size={14} />
@@ -3286,7 +3429,7 @@ export default function App() {
                           </div>
                         ))
                     ) : (
-                      <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border">
+                      <div className="text-center py-10 bg-slate-50 border border-dashed border-modern-border rounded-xl">
                         <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-wider">Nenhuma venda manual registrada</p>
                       </div>
                     )}
@@ -3300,8 +3443,8 @@ export default function App() {
                       <div className="space-y-4">
                         <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest border-b border-modern-border pb-2">Histórico de Interações</p>
                         {interactionLogs[currentSelectedClient.key].map(log => (
-                          <div key={log.id} className="flex gap-4 items-start bg-emerald-50/30 p-4 border border-emerald-100">
-                             <div className="w-6 h-6 bg-emerald-600 flex items-center justify-center shrink-0">
+                          <div key={log.id} className="flex gap-4 items-start bg-emerald-50/30 p-4 border border-emerald-100 rounded-xl">
+                             <div className="w-6 h-6 bg-emerald-600 flex items-center justify-center shrink-0 rounded-md">
                                 {log.type === 'tag_change' ? <AlertCircle size={12} className="text-white" /> : <Database size={12} className="text-white" />}
                              </div>
                              <div>
@@ -3315,7 +3458,7 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-3 mb-8">
-                    <div className="w-8 h-8 bg-modern-primary/10 rounded-none flex items-center justify-center text-modern-primary">
+                    <div className="w-8 h-8 bg-modern-primary/10 rounded-lg flex items-center justify-center text-modern-primary">
                       <History size={18} />
                     </div>
                     <h4 className="text-xs font-extrabold uppercase tracking-[0.15em] text-modern-text">Histórico de Atividade</h4>
@@ -3323,7 +3466,7 @@ export default function App() {
 
                   <div className="space-y-8">
                     {currentSelectedClient.leads.map((lead) => (
-                      <div key={lead.id} className="modern-card p-8 border-none shadow-sm bg-slate-50/50">
+                      <div key={lead.id} className="modern-card p-8 border-none shadow-sm bg-slate-50/50 rounded-2xl">
                         <div className="flex justify-between items-start mb-6">
                           <div>
                             <p className="text-[10px] font-extrabold text-modern-secondary mb-2 flex items-center gap-2">
@@ -3335,14 +3478,14 @@ export default function App() {
                             <p className="text-lg font-extrabold text-modern-primary mb-2">{lead.valor}</p>
                             <div className="flex flex-col items-end gap-2">
                               <span className={cn(
-                                "text-[9px] font-extrabold uppercase tracking-widest px-2 py-1 rounded-none shadow-sm",
+                                "text-[9px] font-extrabold uppercase tracking-widest px-2 py-1 rounded-md shadow-sm",
                                 STATUS_THEMES[lead.status]?.bg || "bg-slate-100",
                                 STATUS_THEMES[lead.status]?.text || "text-slate-500"
                               )}>
                                 {lead.status}
                               </span>
                               {lead.paymentMethod && (
-                                <span className="text-[8px] font-bold text-modern-secondary uppercase tracking-wider bg-white border border-modern-border px-2 py-0.5">
+                                <span className="text-[8px] font-bold text-modern-secondary uppercase tracking-wider bg-white border border-modern-border px-2 py-0.5 rounded-md">
                                   {lead.paymentMethod}
                                 </span>
                               )}
@@ -3353,12 +3496,12 @@ export default function App() {
                         <div className="flex items-center gap-4">
                           <button 
                             onClick={() => handleGenerateMessage(lead)}
-                            className="modern-button text-xs py-3 px-8"
+                            className="modern-button text-xs py-3 px-8 rounded-lg"
                           >
                             Gerar Mensagem IA
                           </button>
                           <div className="flex-1" />
-                          <p className="text-[10px] text-modern-secondary font-mono bg-white px-2 py-1 rounded-none border border-modern-border">ID: {lead.codPay}</p>
+                          <p className="text-[10px] text-modern-secondary font-mono bg-white px-2 py-1 rounded-md border border-modern-border">ID: {lead.codPay}</p>
                         </div>
 
                         <AnimatePresence>
@@ -3366,7 +3509,7 @@ export default function App() {
                             <motion.div 
                               initial={{ opacity: 0, height: 0 }}
                               animate={{ opacity: 1, height: 'auto' }}
-                              className="mt-6 p-5 bg-modern-primary/5 rounded-none italic text-xs text-modern-primary font-medium border border-modern-primary/10"
+                              className="mt-6 p-5 bg-modern-primary/5 rounded-lg italic text-xs text-modern-primary font-medium border border-modern-primary/10"
                             >
                               Compondo abordagem personalizada com IA...
                             </motion.div>
@@ -3381,11 +3524,11 @@ export default function App() {
                                 <textarea 
                                   readOnly
                                   value={generatedMessage}
-                                  className="w-full h-40 p-5 bg-white border border-modern-border rounded-none text-xs font-medium text-modern-text focus:outline-none resize-none leading-relaxed shadow-inner"
+                                  className="w-full h-40 p-5 bg-white border border-modern-border rounded-xl text-xs font-medium text-modern-text focus:outline-none resize-none leading-relaxed shadow-inner"
                                 />
                                 <button 
                                   onClick={() => copyToClipboard(generatedMessage)}
-                                  className="absolute bottom-4 right-4 p-3 bg-white rounded-none shadow-lg border border-modern-border text-modern-secondary hover:text-modern-primary transition-all"
+                                  className="absolute bottom-4 right-4 p-3 bg-white rounded-xl shadow-lg border border-modern-border text-modern-secondary hover:text-modern-primary transition-all"
                                 >
                                   {copied ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
                                 </button>
