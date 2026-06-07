@@ -213,96 +213,12 @@ const PT_NAMES = new Set([
   "sena", "simao", "simoes", "sobrio", "sobral", "tavares", "teles", "theodoro", "toledo", "torres", 
   "valente", "vales", "vargas", "vasconcelos", "vaz", "veiga", "vellozo", "veloso", "vilela", "villa", 
   "vila", "zardo",
-  
-  // Custom Customer Names for Perfect Guessing Heuristics
-  "eliano", "eliana", "joelson", "joelsom", "jaelson", "jaelsom", "lazaro", "delaceli", "laceli",
 
   // Common descriptive words
   "sucata", "mecanica", "mecanico", "comercio", "construcao", "vendas", "oficina", "pintor"
 ]);
 
 const JUNK_WORDS = new Set(['ltda', 'tda', 'me', 'eireli', 'xp', 'online', 'sp', 'mg', 'br', 'com', 'adm', 'contato', 'web', 'site']);
-
-const playNotificationSound = (type: 'aprovado' | 'other') => {
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
-    
-    if (type === 'aprovado') {
-      const now = ctx.currentTime;
-      const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
-      notes.forEach((freq, index) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + index * 0.1);
-        
-        gain.gain.setValueAtTime(0.12, now + index * 0.1);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.1 + 0.25);
-        
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + index * 0.1);
-        osc.stop(now + index * 0.1 + 0.25);
-      });
-    } else {
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(392.00, now); // G4
-      
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.35);
-    }
-  } catch (error) {
-    console.error("Erro ao tocar som:", error);
-  }
-};
-
-const cleanClientName = (name: string): string => {
-  if (!name) return "";
-  
-  // Strip "(E-mail)" or variations
-  let cleaned = name.replace(/\(e-mail\)/gi, '')
-                    .replace(/\(email\)/gi, '')
-                    .trim();
-  
-  const replacements: [RegExp, string][] = [
-    [/e\s+L\s+ian\s+O/gi, "Eliano"],
-    [/e\s*l\s*i\s*a\s*n\s*o/gi, "Eliano"],
-    [/de\s+Lac\s+e\s+Li/gi, "de Laceli"],
-    [/de\s*l\s*a\s*c\s*e\s*l\s*i/gi, "Delaceli"],
-    [/Jo\s+Elson/gi, "Joelson"],
-    [/Jo\s*e\s*l\s*s\s*o\s*n/gi, "Joelson"],
-    [/Jaespn/gi, "Jaelson"],
-    [/Jaeson/gi, "Jaelson"],
-    [/Ja\s+Elson/gi, "Jaelson"],
-    [/Ja\s*e\s*l\s*s\s*o\s*n/gi, "Jaelson"],
-    [/Jo\s+Elson\s+Lazaro/gi, "Jaelson Lazaro"],
-    [/Joelson\s+Lazaro/gi, "Jaelson Lazaro"],
-  ];
-  
-  for (const [regex, replacement] of replacements) {
-    cleaned = cleaned.replace(regex, replacement);
-  }
-  
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-  
-  return cleaned.split(/\s+/).map(word => {
-    const lower = word.toLowerCase();
-    if (['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower)) {
-      return lower;
-    }
-    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-  }).join(' ');
-};
 
 const segmentWord = (rawWord: string): string[] => {
   const wordLower = rawWord.toLowerCase();
@@ -440,9 +356,6 @@ const getNameFromEmail = (email?: string): string => {
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
-  const seenLeadsRef = useRef<Set<string>>(new Set());
-  const isFirstLoadRef = useRef(true);
-  const [copiedBulk, setCopiedBulk] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1393,8 +1306,8 @@ export default function App() {
     }
   };
 
-  const fetchData = async (isSilent = false) => {
-    if (!isSilent) setRefreshing(true);
+  const fetchData = async () => {
+    setRefreshing(true);
     try {
       const response = await fetch(SHEET_CSV_URL);
       const csvText = await response.text();
@@ -1631,6 +1544,8 @@ export default function App() {
               if (client.status === 'Aprovado') {
                 existing.status = 'Aprovado';
               }
+            } else {
+              mergedClientsList.push(client);
             }
           });
 
@@ -1643,12 +1558,9 @@ export default function App() {
             if (isNameless(name) && email) {
               const derivedName = getNameFromEmail(email);
               if (derivedName) {
-                name = derivedName;
+                name = `${derivedName} (E-mail)`;
               }
             }
-            
-            // Clean client name following Portuguese casing rules and remove tracking email markers
-            name = cleanClientName(name);
             
             let stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
             
@@ -1660,7 +1572,7 @@ export default function App() {
               stableKey = `${stableKey}_${suffix}`;
             }
             seenKeys.add(stableKey);
-  
+ 
             return {
               ...client,
               nome: name,
@@ -1674,42 +1586,9 @@ export default function App() {
             };
           }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
 
-          // Real-time sound notifier for new spreadsheet entries
-          let playedAprovado = false;
-          let playedOther = false;
-
-          rawLeads.forEach(lead => {
-            const key = `${lead.data}_${lead.hora}_${lead.nome}_${lead.telefone}_${lead.produto}_${lead.valor}_${lead.rowNumber}`;
-            if (!seenLeadsRef.current.has(key)) {
-              seenLeadsRef.current.add(key);
-              if (!isFirstLoadRef.current) {
-                if (lead.status === 'Aprovado') {
-                  playedAprovado = true;
-                } else {
-                  playedOther = true;
-                }
-              }
-            }
-          });
-
-          if (!isFirstLoadRef.current) {
-            if (playedAprovado) {
-              playNotificationSound('aprovado');
-              if (playedOther) {
-                setTimeout(() => playNotificationSound('other'), 800);
-              }
-            } else if (playedOther) {
-              playNotificationSound('other');
-            }
-          }
-
-          if (isFirstLoadRef.current && rawLeads.length > 0) {
-            isFirstLoadRef.current = false;
-          }
-
           setClients(sortedClients);
           setLoading(false);
-          setRefreshing(false);  setRefreshing(false);
+          setRefreshing(false);
         },
         error: (error: any) => {
           console.error("Erro ao processar CSV:", error);
@@ -1726,14 +1605,6 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-  }, []);
-
-  // Periodic automatic silent synchronization with Google Spreadsheet entries on a 20s interval
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchData(true);
-    }, 20000);
-    return () => clearInterval(interval);
   }, []);
 
   const enrichedClients = useMemo(() => {
@@ -2047,154 +1918,102 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const copyTop10Clients = () => {
-    const clientsToCopy = filteredClients.slice(0, 10);
-    if (clientsToCopy.length === 0) return;
-    const lines = clientsToCopy.map(client => {
-      const lastLead = client.leads[0];
-      const prod = lastLead?.produto || 'Sem produto';
-      const status = client.status || 'Sem status';
-      return `${client.nome} - ${client.telefone} - ${prod} - ${status}`;
-    });
-    const textToCopy = lines.join('\n');
-    navigator.clipboard.writeText(textToCopy);
-    setCopiedBulk(true);
-    setTimeout(() => setCopiedBulk(false), 2000);
-  };
-
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F7F8F6] text-[#1A1F1A] font-sans">
-      {/* Persistent Glass Sidebar */}
-      <aside className="sidebar shrink-0 relative z-25 flex flex-col h-full bg-white/80 backdrop-blur-xl border-r border-[rgba(60,79,61,0.12)]">
-        {/* Brand Header */}
-        <div className="h-20 px-6 flex items-center gap-3 border-b border-[rgba(60,79,61,0.12)] shrink-0">
-          <div className="w-9 h-9 bg-[#3C4F3D] rounded-lg flex items-center justify-center text-white shadow-md">
-            <Package size={18} />
-          </div>
-          <div>
-            <h1 className="text-md font-bold tracking-tight text-[#1A1F1A]">Dominus CRM</h1>
-            <p className="text-[10px] uppercase tracking-wider font-semibold text-[#4A5568]">Controle de Leads</p>
-          </div>
-        </div>
-
-        {/* Navigation Items */}
-        <div className="flex-1 px-4 py-6 flex flex-col gap-1 overflow-y-auto">
-          <button
-            onClick={() => setView('crm')}
-            className={cn(
-              "sidebar-item text-left flex items-center gap-2 w-full",
-              view === 'crm' && "active"
-            )}
-          >
-            <Users size={16} />
-            <span>Base de Leads</span>
-          </button>
-
-          <button
-            onClick={() => setView('dashboard')}
-            className={cn(
-              "sidebar-item text-left flex items-center gap-2 w-full",
-              view === 'dashboard' && "active"
-            )}
-          >
-            <LayoutDashboard size={16} />
-            <span>Dashboard</span>
-          </button>
-
-          <button
-            onClick={() => setView('followup')}
-            className={cn(
-              "sidebar-item text-left flex items-center gap-2 w-full",
-              view === 'followup' && "active"
-            )}
-          >
-            <Clock size={16} />
-            <span>Follow-up</span>
-          </button>
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="p-4 border-t border-[rgba(60,79,61,0.12)] flex flex-col gap-2 shrink-0">
-          <button
-            onClick={() => setShowWhatsappManager(true)}
-            className="sidebar-item text-left flex items-center gap-2 w-full"
-          >
-            <Phone size={16} />
-            <span>Contas WhatsApp</span>
-          </button>
-
-          <button
-            onClick={() => setShowSettings(true)}
-            className="sidebar-item text-left flex items-center gap-2 w-full"
-          >
-            <Settings size={16} />
-            <span>Sincronização</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content Workspace */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-[#F7F8F6]">
-        {/* Glass Navbar Header */}
-        <header className="navbar h-20 px-10 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-bold text-[#1A1F1A]">
-              {view === 'crm' ? 'Gestão de Clientes' : view === 'dashboard' ? 'Métricas de Performance' : 'Follow-up Timeouts'}
-            </h2>
-            
+    <div className="flex h-screen overflow-hidden bg-modern-bg font-sans">
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Header - Simple Style */}
+        <header className="h-20 px-10 glass-header flex items-center justify-between shrink-0 z-10">
+          <div className="flex items-center gap-6">
+            <div className="w-10 h-10 bg-modern-primary rounded-none flex items-center justify-center text-white shadow-lg shadow-modern-primary/20">
+              <Package size={20} />
+            </div>
+            <div className="flex items-center gap-4">
+              <h1 className="text-lg font-bold tracking-tight text-modern-text">Dominus CRM</h1>
+              <div className="h-4 w-px bg-modern-border" />
+              <p className="text-xs font-semibold text-modern-secondary">Controle de Leads</p>
+            </div>
             {effectiveOwnerEmail && user && effectiveOwnerEmail !== user.email && (
-              <div className="flex items-center gap-2 px-2.5 py-1 bg-[#3C4F3D]/10 border border-[rgba(60,79,61,0.12)] text-[#3C4F3D] text-[10px] font-black uppercase tracking-widest rounded-full">
-                <Users size={10} />
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-tighter">
+                <Users size={12} className="text-emerald-500" />
                 Dono: {effectiveOwnerEmail.split('@')[0]}
               </div>
             )}
-
-            {view === 'crm' && (
-              <div className="flex items-center gap-2 ml-2">
-                <button 
-                  onClick={() => setShowOnlyManualSales(!showOnlyManualSales)}
-                  className={cn(
-                    "px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border rounded-md transition-all",
-                    showOnlyManualSales 
-                      ? "bg-[#3C4F3D] border-[#3C4F3D] text-white" 
-                      : "bg-white border-[rgba(60,79,61,0.12)] text-[#4A5568] hover:border-[#3C4F3D]"
-                  )}
-                >
-                  {showOnlyManualSales ? "Com Vendas" : "Todas as Leads"}
-                </button>
-              </div>
-            )}
+            <div className="flex items-center gap-2 ml-4">
+              <button 
+                onClick={() => setShowOnlyManualSales(!showOnlyManualSales)}
+                className={cn(
+                  "px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border transition-all",
+                  showOnlyManualSales 
+                    ? "bg-emerald-600 border-emerald-600 text-white" 
+                    : "bg-white border-modern-border text-modern-secondary hover:border-modern-primary"
+                )}
+              >
+                {showOnlyManualSales ? "Mostrando: Com Vendas" : "Filtrar: Com Vendas"}
+              </button>
+            </div>
           </div>
-
+          
           <div className="flex items-center gap-6">
-            {/* Live Stats */}
             <div className="hidden lg:flex gap-6">
               <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#4A5568]">Minha Comissão</p>
-                <p className="text-sm font-extrabold text-[#3C4F3D]">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Minha Comissão</p>
+                <p className="text-sm font-bold text-emerald-600">
                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalCommission)}
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#4A5568]">Vendas Manuais</p>
-                <p className="text-sm font-extrabold text-[#1A1F1A]">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Vendas Manuais</p>
+                <p className="text-sm font-bold text-modern-text">
                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.manualRevenue)}
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[#4A5568]">Total Planilha</p>
-                <p className="text-sm font-extrabold text-[#1A1F1A]">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Total Planilha</p>
+                <p className="text-sm font-bold text-modern-text">
                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalRevenue)}
                 </p>
               </div>
             </div>
-
             <div className="flex items-center gap-2">
+               <button 
+                onClick={() => setView(view === 'followup' ? 'crm' : 'followup')}
+                className={cn(
+                  "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
+                  view === 'followup' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
+                )}
+                title="Ver Follow-up"
+              >
+                <Clock size={18} />
+              </button>
               <button 
-                onClick={() => fetchData()}
+                onClick={() => setView(view === 'dashboard' ? 'crm' : 'dashboard')}
+                className={cn(
+                  "w-10 h-10 border border-modern-border rounded-none flex items-center justify-center transition-all shadow-sm",
+                  view === 'dashboard' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
+                )}
+                title={view === 'dashboard' ? "Ver CRM" : "Ver Dashboard"}
+              >
+                {view === 'dashboard' ? <Users size={18} /> : <LayoutDashboard size={18} />}
+              </button>
+              <button 
+                onClick={() => setShowSettings(true)}
+                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all shadow-sm"
+                title="Configurações de Sincronização"
+              >
+                <Settings size={18} />
+              </button>
+              <button 
+                onClick={() => setShowWhatsappManager(true)}
+                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-emerald-600 transition-all shadow-sm"
+                title="Gerenciar WhatsApps"
+              >
+                <Phone size={18} />
+              </button>
+              <button 
+                onClick={fetchData}
                 disabled={refreshing}
-                className="w-10 h-10 bg-white border border-[rgba(60,79,61,0.12)] rounded-lg flex items-center justify-center text-[#4A5568] hover:text-[#3C4F3D] transition-all disabled:opacity-30 shadow-sm"
-                title="Sincronizar Planilha"
+                className="w-10 h-10 bg-white border border-modern-border rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm"
               >
                 <RefreshCw size={18} strokeWidth={2.5} className={cn(refreshing && "animate-spin")} />
               </button>
@@ -2334,23 +2153,14 @@ export default function App() {
             />
           </div>
 
-                      <div className="relative z-[60] flex items-center gap-2">
+                      <div className="relative z-[60]">
                         <button 
                           onClick={() => setShowFilterMenu(!showFilterMenu)}
-                          className="flex items-center gap-3 bg-white border border-modern-border rounded-lg px-5 py-3 shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-modern-text"
+                          className="flex items-center gap-3 bg-white border border-modern-border rounded-none px-5 py-3 shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-modern-text"
                         >
                           <Filter size={18} className="text-modern-secondary" />
                           <span>Filtros</span>
                           <ChevronDown size={16} className={cn("text-modern-secondary transition-transform", showFilterMenu && "rotate-180")} />
-                        </button>
-
-                        <button 
-                          onClick={copyTop10Clients}
-                          className="btn-secondary flex items-center gap-2 px-5 py-3 border border-modern-border bg-white text-[#3C4F3D] font-bold text-sm rounded-lg hover:bg-[rgba(71,98,96,0.12)] shadow-sm transition-all whitespace-nowrap"
-                          title="Copiar os primeiros 10 clientes visualizados de uma vez"
-                        >
-                          {copiedBulk ? <CheckCircle2 size={16} className="text-[#3C4F3D]" /> : <Copy size={16} />}
-                          <span>{copiedBulk ? 'Copiado!' : 'Copiar 10 Clientes'}</span>
                         </button>
 
                         <AnimatePresence>
