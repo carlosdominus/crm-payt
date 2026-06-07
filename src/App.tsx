@@ -420,6 +420,22 @@ const getNameFromEmail = (email?: string): string => {
     .join(' ');
 };
 
+const cleanCustomerName = (name: string, email?: string): string => {
+  if (!name) return '';
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  
+  if (lower === 'do uglasw mendes' || lower === 'uglasw mendes') {
+    return 'Douglas Mendes';
+  }
+  
+  if (lower === 'rob e rtaf' || (email && email.toLowerCase().trim() === 'robertaf1704@hotmail.com')) {
+    return 'Roberta';
+  }
+  
+  return trimmed;
+};
+
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [top10Copied, setTop10Copied] = useState(false);
@@ -1660,6 +1676,8 @@ export default function App() {
               }
             }
             
+            name = cleanCustomerName(name, email);
+            
             let stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
             
             if (seenKeys.has(stableKey)) {
@@ -2529,7 +2547,7 @@ export default function App() {
                           {lastLead?.rowNumber || '-'}
                         </td>
                         <td className="px-3 py-1 border-b border-r border-[#dadce0]">
-                          <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                             {client.telefone && (
                               <button 
                                 onClick={() => {
@@ -2555,59 +2573,42 @@ export default function App() {
                             >
                               <Clock size={12} />
                             </button>
-                            
-                            {/* Hover Menu for action tags */}
-                            <div className="relative group/tagmenu" onClick={(e) => e.stopPropagation()}>
-                              <button 
-                                className={cn(
-                                  "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
-                                  ['contato_sucesso', 'contato_falha', 'vendido'].includes(currentTag as string)
-                                    ? "bg-modern-primary border-modern-primary text-white" 
-                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                )}
-                              >
-                                <Plus size={12} />
-                              </button>
-                              
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/tagmenu:flex bg-white border border-modern-border shadow-xl z-50 p-1 gap-1 rounded-lg">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_sucesso'); }}
-                                  className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
-                                    currentTag === 'contato_sucesso' 
-                                      ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
-                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                                  )}
-                                  title="Contato Bem Sucedido"
-                                >
-                                  <UserCheck size={14} />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'contato_falha'); }}
-                                  className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
-                                    currentTag === 'contato_falha' 
-                                      ? "bg-gray-100 border-gray-300 text-gray-800" 
-                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                                  )}
-                                  title="Contato Mal Sucedido"
-                                >
-                                  <UserX size={14} />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); toggleTag(clientKey, 'vendido'); }}
-                                  className={cn(
-                                    "w-8 h-8 flex items-center justify-center transition-all border rounded-md",
-                                    currentTag === 'vendido' 
-                                      ? "bg-emerald-500 border-emerald-600 text-white" 
-                                      : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                                  )}
-                                  title="Vendido"
-                                >
-                                  <CheckCircle2 size={14} />
-                                </button>
-                              </div>
-                            </div>
+                            <button 
+                              onClick={() => toggleTag(clientKey, 'contato_sucesso')}
+                              className={cn(
+                                "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                currentTag === 'contato_sucesso' 
+                                  ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
+                                  : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                              )}
+                              title="Contato Bem Sucedido"
+                            >
+                              <UserCheck size={12} />
+                            </button>
+                            <button 
+                              onClick={() => toggleTag(clientKey, 'contato_falha')}
+                              className={cn(
+                                "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                currentTag === 'contato_falha' 
+                                  ? "bg-gray-100 border-gray-300 text-gray-800" 
+                                  : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                              )}
+                              title="Contato Mal Sucedido"
+                            >
+                              <UserX size={12} />
+                            </button>
+                            <button 
+                              onClick={() => toggleTag(clientKey, 'vendido')}
+                              className={cn(
+                                "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                currentTag === 'vendido' 
+                                  ? "bg-emerald-500 border-emerald-600 text-white" 
+                                  : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                              )}
+                              title="Vendido"
+                            >
+                              <CheckCircle2 size={12} />
+                            </button>
                             <button 
                               onClick={() => toggleTag(clientKey, 'lixo')}
                               className={cn(
