@@ -1871,8 +1871,7 @@ export default function App() {
             } else {
               // Deterministic key: phone OR email OR name
               // BUT we prefix it to avoid collisions between different types
-              const cleanT = lead.telefone ? cleanPhone(lead.telefone) : "";
-              const clientKey = cleanT ? `tel_${cleanT}` : (lead.email ? `email_${lead.email.toLowerCase().trim()}` : `name_${lead.nome.toLowerCase().trim()}`);
+              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
               
               const newClient: Client = {
                 email: lead.email,
@@ -1954,8 +1953,7 @@ export default function App() {
             
             name = cleanCustomerName(name, email);
             
-            const cleanP = phone ? cleanPhone(phone) : "";
-            let stableKey = cleanP ? `tel_${cleanP}` : (email ? `email_${email.toLowerCase().trim()}` : `name_${name.toLowerCase().trim()}`);
+            let stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
             
             if (seenKeys.has(stableKey)) {
               let suffix = 1;
