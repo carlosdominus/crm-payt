@@ -32,6 +32,10 @@ import {
   AlertCircle,
   Hash,
   ShoppingBag,
+  Bell,
+  BellOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format, differenceInHours, differenceInDays } from 'date-fns';
@@ -58,7 +62,7 @@ import {
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog, ManualFollowup } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -140,6 +144,20 @@ const isValidPhone = (phone: string): boolean => {
     return cleaned.startsWith('55');
   }
   return false;
+};
+
+const formatBrazilianPhone = (value: string): string => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length <= 2) {
+    return digits;
+  }
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  }
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 };
 
 const isNameless = (name?: string): boolean => {
@@ -482,6 +500,70 @@ const determineActiveStatus = (leads: Lead[]): string => {
   return bestLead.status;
 };
 
+let alarmAudioContext: AudioContext | null = null;
+let alarmInterval: any = null;
+
+const startAlarmSound = () => {
+  if (alarmInterval) return; // already beeping
+  
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!alarmAudioContext && AudioContextClass) {
+      alarmAudioContext = new AudioContextClass();
+    }
+  } catch (e) {
+    console.error("Audio Context failed to start:", e);
+  }
+
+  alarmInterval = setInterval(() => {
+    try {
+      if (!alarmAudioContext) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) alarmAudioContext = new AudioContextClass();
+      }
+      if (alarmAudioContext) {
+        if (alarmAudioContext.state === 'suspended') {
+          alarmAudioContext.resume();
+        }
+        
+        const osc1 = alarmAudioContext.createOscillator();
+        const osc2 = alarmAudioContext.createOscillator();
+        const gainNode = alarmAudioContext.createGain();
+        
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(alarmAudioContext.destination);
+        
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(900, alarmAudioContext.currentTime);
+        osc1.frequency.exponentialRampToValueAtTime(1200, alarmAudioContext.currentTime + 0.25);
+        
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(450, alarmAudioContext.currentTime);
+        osc2.frequency.exponentialRampToValueAtTime(600, alarmAudioContext.currentTime + 0.25);
+        
+        gainNode.gain.setValueAtTime(0.2, alarmAudioContext.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.01, alarmAudioContext.currentTime + 0.35);
+        
+        osc1.start();
+        osc2.start();
+        
+        osc1.stop(alarmAudioContext.currentTime + 0.4);
+        osc2.stop(alarmAudioContext.currentTime + 0.4);
+      }
+    } catch (e) {
+      console.warn("Alarm chime failed to play:", e);
+    }
+  }, 900);
+};
+
+const stopAlarmSound = () => {
+  if (alarmInterval) {
+    clearInterval(alarmInterval);
+    alarmInterval = null;
+  }
+};
+
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [top10Copied, setTop10Copied] = useState(false);
@@ -504,6 +586,13 @@ export default function App() {
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
+  const [followupMode, setFollowupMode] = useState<'automatic' | 'manual'>('automatic');
+  const [manualFollowups, setManualFollowups] = useState<ManualFollowup[]>([]);
+  const [manualFollowupForm, setManualFollowupForm] = useState({
+    name: "",
+    phone: "",
+    date: ""
+  });
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
@@ -1204,6 +1293,150 @@ export default function App() {
 
     return () => unsubscribe();
   }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
+
+  // Sync Manual Followups
+  useEffect(() => {
+    if (!authReady || !effectiveWorkspaceId) return;
+
+    if (!user) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      if (saved) {
+        try {
+          setManualFollowups(JSON.parse(saved));
+        } catch (e) {
+          console.error("Erro ao carregar follow-ups manuais locais:", e);
+        }
+      }
+      return;
+    }
+
+    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/manualFollowups`), (snapshot) => {
+      const followups: ManualFollowup[] = [];
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        followups.push({
+          id: doc.id,
+          name: data.name || '',
+          phone: data.phone || '',
+          date: data.date || '',
+          status: data.status || 'pending',
+          createdAt: data.createdAt || ''
+        });
+      });
+      // Sort in-order of creation or scheduled date
+      followups.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+      setManualFollowups(followups);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/manualFollowups`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, user, effectiveWorkspaceId]);
+
+  const addManualFollowup = async (name: string, phone: string, date: string) => {
+    const id = Date.now().toString();
+    const newFollowup: ManualFollowup = {
+      id,
+      name,
+      phone,
+      date, // YYYY-MM-DDTHH:mm
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!user) {
+      const updated = [newFollowup, ...manualFollowups];
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    if (!effectiveWorkspaceId) return;
+    try {
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id), newFollowup);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
+    }
+  };
+
+  const updateManualFollowupStatus = async (id: string, status: 'pending' | 'sent') => {
+    if (!user) {
+      const updated = manualFollowups.map(item => item.id === id ? { ...item, status } : item);
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    if (!effectiveWorkspaceId) return;
+    try {
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id), { status }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
+    }
+  };
+
+  const deleteManualFollowup = async (id: string) => {
+    if (!user) {
+      const updated = manualFollowups.filter(item => item.id !== id);
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    if (!effectiveWorkspaceId) return;
+    try {
+      await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
+    }
+  };
+
+  // Alarm mechanism states
+  const [activeAlarmCount, setActiveAlarmCount] = useState(0);
+  const [unlockedAudio, setUnlockedAudio] = useState(false);
+
+  const unlockAudioContext = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!alarmAudioContext && AudioContextClass) {
+        alarmAudioContext = new AudioContextClass();
+      }
+      if (alarmAudioContext) {
+        alarmAudioContext.resume().then(() => {
+          setUnlockedAudio(true);
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao habilitar áudio:", e);
+    }
+  };
+
+  // Alarm Checker Effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const ringing = manualFollowups.filter(f => {
+        if (f.status !== 'pending' || !f.date) return false;
+        try {
+          return new Date(f.date).getTime() <= Date.now();
+        } catch (e) {
+          return false;
+        }
+      });
+
+      setActiveAlarmCount(ringing.length);
+
+      if (ringing.length > 0) {
+        startAlarmSound();
+      } else {
+        stopAlarmSound();
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      stopAlarmSound();
+    };
+  }, [manualFollowups]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
@@ -2196,120 +2429,413 @@ export default function App() {
         <div className="flex-1 overflow-hidden flex flex-col">
           {view === 'followup' ? (
             <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-modern-border">
                 <div>
-                  <h2 className="text-2xl font-bold text-modern-text">Dashboard de Follow-up</h2>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Leads aguardando retorno baseado em regras de tempo</p>
+                  <h2 className="text-2xl font-bold text-modern-text flex items-center gap-2">
+                    Dashboard de Follow-up
+                    {activeAlarmCount > 0 && (
+                      <span className="flex h-3 w-3 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Acompanhamento e lembretes de clientes para conversão</p>
                 </div>
-                <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4">
-                   <Clock size={20} className="text-modern-primary" />
-                   <div>
-                     <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
-                     <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
-                   </div>
+
+                {/* Switch between Automatic/Manual */}
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                  <button 
+                    onClick={() => setFollowupMode('automatic')}
+                    className={cn(
+                      "flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all",
+                      followupMode === 'automatic' 
+                        ? "bg-white text-modern-primary shadow-sm" 
+                        : "text-modern-secondary hover:text-modern-text"
+                    )}
+                  >
+                    <RefreshCw size={14} className={cn(followupMode === 'automatic' && "text-modern-primary")} />
+                    Automático
+                  </button>
+                  <button 
+                    onClick={() => setFollowupMode('manual')}
+                    className={cn(
+                      "flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all",
+                      followupMode === 'manual' 
+                        ? "bg-white text-modern-primary shadow-sm" 
+                        : "text-modern-secondary hover:text-modern-text"
+                    )}
+                  >
+                    <Clock size={14} className={cn(followupMode === 'manual' && "text-modern-primary")} />
+                    Manual
+                  </button>
                 </div>
               </div>
 
-              <div className="bg-white border border-modern-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-separate border-spacing-0">
-                    <thead>
-                      <tr className="bg-[#f8f9fa]">
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {followupClients.map(client => {
-                        const tag = clientTags[client.key];
-                        const tagDateStr = tagTimestamps[client.key];
-                        const pStatus = paymentStatuses[client.key];
-                        const potCount = potsCounts[client.key];
-                        const now = new Date();
+              {followupMode === 'automatic' ? (
+                <>
+                  <div className="flex items-center justify-between col-span-full">
+                    <div>
+                      <h3 className="text-base font-bold text-modern-text">Retornos Automáticos</h3>
+                      <p className="text-xs text-modern-secondary">Clientes sugeridos pelo CRM com base nos prazos de compra, reloginho e faturas pendentes</p>
+                    </div>
+                    <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4 rounded-xl">
+                       <Clock size={20} className="text-modern-primary" />
+                       <div>
+                         <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
+                         <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
+                       </div>
+                    </div>
+                  </div>
 
-                        let reason = "";
-                        let displayTime = "";
-                        
-                        if (tag === 'reloginho' && tagDateStr) {
-                           reason = "Follow-up Manual (Reloginho)";
-                           displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
-                        } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Pix Enviado";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Link de Pagamento";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Boleto";
-                           displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
-                        } else if (potCount > 0 && client.lastPurchaseDate) {
-                           reason = `Recompra - ${potCount} Pote(s)`;
-                           displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
-                        }
-
-                        return (
-                          <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
-                                  {client.nome.charAt(0)}
-                                </div>
-                                <div>
-                                  <p className="text-xs font-bold text-modern-text">{client.nome}</p>
-                                  <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-2">
-                                 <AlertCircle size={14} className="text-orange-500" />
-                                 <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                               <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
-                            </td>
-                            <td className="px-4 py-4 border-b border-[#dadce0]">
-                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
-                                 <button 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     const msg = `Olá ${client.nome}, estou passando para...`;
-                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                     window.open(url, '_blank');
-                                   }}
-                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
-                                 >
-                                   Chamar no Zap
-                                 </button>
-                                 <button 
-                                   onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleTag(client.key, 'contato_sucesso');
-                                   }}
-                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-                                 >
-                                   Resolvido
-                                 </button>
-                              </div>
-                            </td>
+                  <div className="bg-white border border-modern-border overflow-hidden rounded-xl shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-separate border-spacing-0">
+                        <thead>
+                          <tr className="bg-[#f8f9fa]">
+                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
+                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
                           </tr>
+                        </thead>
+                        <tbody>
+                          {followupClients.map(client => {
+                            const tag = clientTags[client.key];
+                            const tagDateStr = tagTimestamps[client.key];
+                            const pStatus = paymentStatuses[client.key];
+                            const potCount = potsCounts[client.key];
+                            const now = new Date();
+
+                            let reason = "";
+                            let displayTime = "";
+                            
+                            if (tag === 'reloginho' && tagDateStr) {
+                               reason = "Follow-up Manual (Reloginho)";
+                               displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
+                            } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+                               reason = "Cobrança de Pix Enviado";
+                               displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                            } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+                               reason = "Cobrança de Link de Pagamento";
+                               displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                            } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+                               reason = "Cobrança de Boleto";
+                               displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
+                            } else if (potCount > 0 && client.lastPurchaseDate) {
+                               reason = `Recompra - ${potCount} Pote(s)`;
+                               displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
+                            }
+
+                            return (
+                              <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px] rounded-lg">
+                                      {client.nome.charAt(0)}
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-modern-text">{client.nome}</p>
+                                      <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                  <div className="flex items-center gap-2">
+                                     <AlertCircle size={14} className="text-orange-500" />
+                                     <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                   <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                                </td>
+                                <td className="px-4 py-4 border-b border-[#dadce0]">
+                                  <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                                     <button 
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         const msg = `Olá ${client.nome}, estou passando para...`;
+                                         const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                         window.open(url, '_blank');
+                                       }}
+                                       className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all rounded-lg shadow-sm font-semibold"
+                                     >
+                                       Chamar no Zap
+                                     </button>
+                                     <button 
+                                       onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleTag(client.key, 'contato_sucesso');
+                                       }}
+                                       className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all rounded-lg"
+                                     >
+                                       Resolvido
+                                     </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {followupClients.length === 0 && (
+                            <tr>
+                              <td colSpan={4} className="px-4 py-20 text-center">
+                                <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
+                                <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                /* Manual Mode Section */
+                <>
+                  <div className="bg-white border border-modern-border rounded-xl p-6 shadow-sm">
+                    <h3 className="text-base font-bold text-modern-text mb-4 flex items-center gap-2">
+                      <Plus size={18} className="text-modern-primary" />
+                      Agendar Novo Follow-up Manual
+                    </h3>
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!manualFollowupForm.name || !manualFollowupForm.phone || !manualFollowupForm.date) {
+                          alert("Por favor, preencha todos os campos do agendamento (Nome, Telefone, Data e Hora).");
+                          return;
+                        }
+                        addManualFollowup(
+                          manualFollowupForm.name,
+                          manualFollowupForm.phone,
+                          manualFollowupForm.date
                         );
-                      })}
-                      {followupClients.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="px-4 py-20 text-center">
-                            <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
-                            <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                        setManualFollowupForm({
+                          name: "",
+                          phone: "",
+                          date: ""
+                        });
+                      }}
+                      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+                    >
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Nome do Cliente</label>
+                        <input 
+                          type="text" 
+                          required
+                          placeholder="EX: Carlos Henrique"
+                          value={manualFollowupForm.name}
+                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, name: e.target.value }))}
+                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Telefone / WhatsApp</label>
+                        <input 
+                          type="text" 
+                          required
+                          placeholder="EX: (11) 98765-4321"
+                          value={manualFollowupForm.phone}
+                          onChange={(e) => {
+                            const formatted = formatBrazilianPhone(e.target.value);
+                            setManualFollowupForm(prev => ({ ...prev, phone: formatted }));
+                          }}
+                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Data e Hora do Alarme</label>
+                        <input 
+                          type="datetime-local" 
+                          required
+                          value={manualFollowupForm.date}
+                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, date: e.target.value }))}
+                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text focus:text-slate-900"
+                        />
+                      </div>
+                      <button 
+                        type="submit"
+                        className="w-full py-3 px-6 bg-modern-primary hover:bg-modern-primary/90 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm font-semibold"
+                      >
+                        <Clock size={14} />
+                        Agendar Alarme
+                      </button>
+                    </form>
+                  </div>
+
+                  {activeAlarmCount > 0 && (
+                    <div className="bg-rose-50 border-2 border-rose-500 rounded-xl p-5 shadow-lg animate-pulse flex flex-col md:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-rose-500 text-white flex items-center justify-center">
+                          <Bell size={24} className="animate-bounce" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-rose-800 uppercase tracking-tight">Despertador de Follow-up Ativo!</h4>
+                          <p className="text-xs font-semibold text-rose-600 mt-0.5">Há {activeAlarmCount} contato(s) manual(is) agendado(s) para agora. O som continuará tocando até você clicar em "Enviado" neles.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button 
+                          onClick={unlockAudioContext}
+                          className={cn(
+                            "flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all shadow-md",
+                            unlockedAudio 
+                              ? "bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200"
+                              : "bg-rose-600 text-white hover:bg-rose-700 hover:shadow-lg"
+                          )}
+                        >
+                          {unlockedAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                          {unlockedAudio ? "Áudio Ativado" : "Ativar Som do Alarme (Clique)"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-black uppercase tracking-widest text-modern-secondary flex items-center gap-2">
+                        <History size={16} />
+                        Lista de Follow-ups Manuais
+                      </h3>
+                      <p className="text-xs text-modern-secondary font-bold uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-lg">
+                        Total: {manualFollowups.length}
+                      </p>
+                    </div>
+
+                    <div className="bg-white border border-modern-border overflow-hidden rounded-xl shadow-sm">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-separate border-spacing-0">
+                          <thead>
+                            <tr className="bg-[#f8f9fa]">
+                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Cliente</th>
+                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Data Agendada</th>
+                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0] text-center">Status / Alarme</th>
+                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {manualFollowups.map(item => {
+                              const isRinging = item.status === 'pending' && new Date(item.date).getTime() <= Date.now();
+                              const isSent = item.status === 'sent';
+                              const scheduledDate = new Date(item.date);
+                              
+                              let statusBadge = null;
+                              if (isSent) {
+                                statusBadge = (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest rounded-full">
+                                    <CheckCircle2 size={10} />
+                                    Enviado
+                                  </span>
+                                );
+                              } else if (isRinging) {
+                                statusBadge = (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-500 text-white text-[9px] font-black uppercase tracking-widest rounded-full animate-pulse shadow-sm">
+                                    <Bell size={10} className="animate-spin" />
+                                    TOCANDO ALARME!
+                                  </span>
+                                );
+                              } else {
+                                statusBadge = (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 text-[9px] font-black uppercase tracking-widest rounded-full">
+                                    <Clock size={10} />
+                                    Agendado
+                                  </span>
+                                );
+                              }
+
+                              let formattedDateStr = "";
+                              try {
+                                formattedDateStr = format(scheduledDate, "dd/MM/yyyy • HH:mm:ss");
+                              } catch (e) {
+                                formattedDateStr = item.date;
+                              }
+
+                              return (
+                                <tr key={item.id} className={cn("transition-all", isRinging ? "bg-rose-50/50 hover:bg-rose-50 animate-pulse" : "hover:bg-slate-50")}>
+                                  <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                    <div className="flex items-center gap-3">
+                                      <div className={cn(
+                                        "w-8 h-8 flex items-center justify-center font-black text-[11px] rounded-lg",
+                                        isRinging ? "bg-rose-100 text-rose-600" : "bg-modern-primary/10 text-modern-primary"
+                                      )}>
+                                        {item.name.charAt(0).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-bold text-modern-text">{item.name}</p>
+                                        <p className="text-[10px] text-modern-secondary">{item.phone}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                    <p className="text-xs font-bold text-modern-text">{formattedDateStr}</p>
+                                  </td>
+                                  <td className="px-4 py-4 border-b border-r border-[#dadce0] text-center">
+                                    {statusBadge}
+                                  </td>
+                                  <td className="px-4 py-4 border-b border-[#dadce0]">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button 
+                                        onClick={() => {
+                                          const msg = `Olá ${item.name}, estou passando para realizar o seu follow-up agendado!`;
+                                          const cleanPhone = item.phone.replace(/\D/g, '');
+                                          const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+                                          window.open(url, '_blank');
+                                        }}
+                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest transition-all rounded-lg shadow-sm font-semibold"
+                                        title="Chamar Cliente no WhatsApp"
+                                      >
+                                        Chamar no Zap
+                                      </button>
+                                      
+                                      {item.status === 'pending' ? (
+                                        <button 
+                                          onClick={() => updateManualFollowupStatus(item.id, 'sent')}
+                                          className="px-3 py-1.5 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-black uppercase tracking-widest transition-all rounded-lg shadow-sm flex items-center gap-1 font-semibold"
+                                          title="Marcar como Enviado"
+                                        >
+                                          Marcar Enviado
+                                        </button>
+                                      ) : (
+                                        <button 
+                                          onClick={() => updateManualFollowupStatus(item.id, 'pending')}
+                                          className="px-3 py-1.5 bg-slate-100 border border-slate-300 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all rounded-lg flex items-center gap-1 font-semibold"
+                                          title="Voltar para Agendado"
+                                        >
+                                          Reabrir
+                                        </button>
+                                      )}
+
+                                      <button 
+                                        onClick={() => {
+                                          if (confirm("Deseja realmente remover este agendamento?")) {
+                                            deleteManualFollowup(item.id);
+                                          }
+                                        }}
+                                        className="p-1 px-2.5 text-rose-500 hover:text-rose-700 rounded-lg border border-transparent hover:border-slate-200 transition-all"
+                                        title="Excluir agendamento"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {manualFollowups.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-4 py-20 text-center">
+                                  <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
+                                  <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Nenhum follow-up manual cadastrado.</p>
+                                  <p className="text-xs text-modern-secondary/60 mt-1">Insira um cliente acima para agendar o despertador.</p>
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ) : view === 'crm' ? (
             <>

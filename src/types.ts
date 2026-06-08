@@ -112,3 +112,13 @@ export const STATUS_THEMES: Record<string, { bg: string; text: string }> = {
   "Expirado": { bg: "bg-[#F44900]", text: "text-white" },
   "Lixo": { bg: "bg-rose-100", text: "text-rose-600" },
 };
+
+export interface ManualFollowup {
+  id: string;
+  name: string;
+  phone: string;
+  date: string; // format YYYY-MM-DDTHH:mm
+  status: 'pending' | 'sent';
+  createdAt: string;
+}
+
