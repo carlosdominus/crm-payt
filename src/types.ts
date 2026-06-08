@@ -92,8 +92,6 @@ export interface Client {
   manualSales?: ManualSale[];
   trackingCode?: string;
   assignedWhatsappId?: string;
-  manualFollowupDate?: string;
-  manualFollowupDone?: boolean;
 }
 
 export const FUNNEL_STEPS = [
