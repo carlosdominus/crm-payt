@@ -120,5 +120,6 @@ export interface ManualFollowup {
   date: string; // format YYYY-MM-DDTHH:mm
   status: 'pending' | 'sent';
   createdAt: string;
+  whatsappAccountId?: string;
 }
 

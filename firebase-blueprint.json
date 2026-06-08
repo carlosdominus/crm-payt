@@ -64,7 +64,8 @@
         "phone": { "type": "string" },
         "date": { "type": "string" },
         "status": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "whatsappAccountId": { "type": "string" }
       },
       "required": ["id", "name", "phone", "date", "status", "createdAt"]
     }

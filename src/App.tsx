@@ -591,7 +591,8 @@ export default function App() {
   const [manualFollowupForm, setManualFollowupForm] = useState({
     name: "",
     phone: "",
-    date: ""
+    date: "",
+    whatsappAccountId: ""
   });
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
@@ -1320,7 +1321,8 @@ export default function App() {
           phone: data.phone || '',
           date: data.date || '',
           status: data.status || 'pending',
-          createdAt: data.createdAt || ''
+          createdAt: data.createdAt || '',
+          whatsappAccountId: data.whatsappAccountId || ''
         });
       });
       // Sort in-order of creation or scheduled date
@@ -1333,7 +1335,7 @@ export default function App() {
     return () => unsubscribe();
   }, [authReady, user, effectiveWorkspaceId]);
 
-  const addManualFollowup = async (name: string, phone: string, date: string) => {
+  const addManualFollowup = async (name: string, phone: string, date: string, whatsappAccountId?: string) => {
     const id = Date.now().toString();
     const newFollowup: ManualFollowup = {
       id,
@@ -1341,7 +1343,8 @@ export default function App() {
       phone,
       date, // YYYY-MM-DDTHH:mm
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(whatsappAccountId ? { whatsappAccountId } : {})
     };
 
     if (!user) {
@@ -2428,10 +2431,10 @@ export default function App() {
         
         <div className="flex-1 overflow-hidden flex flex-col">
           {view === 'followup' ? (
-            <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-modern-border">
+            <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-modern-border">
                 <div>
-                  <h2 className="text-2xl font-bold text-modern-text flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-modern-text flex items-center gap-2">
                     Dashboard de Follow-up
                     {activeAlarmCount > 0 && (
                       <span className="flex h-3 w-3 relative">
@@ -2440,33 +2443,33 @@ export default function App() {
                       </span>
                     )}
                   </h2>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Acompanhamento e lembretes de clientes para conversão</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-modern-secondary mt-0.5">Acompanhamento e lembretes de clientes para conversão</p>
                 </div>
 
                 {/* Switch between Automatic/Manual */}
-                <div className="flex bg-slate-100 p-1 rounded-xl">
+                <div className="flex bg-slate-100 p-1 rounded-lg">
                   <button 
                     onClick={() => setFollowupMode('automatic')}
                     className={cn(
-                      "flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all",
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
                       followupMode === 'automatic' 
-                        ? "bg-white text-modern-primary shadow-sm" 
+                        ? "bg-white text-modern-primary shadow-xs" 
                         : "text-modern-secondary hover:text-modern-text"
                     )}
                   >
-                    <RefreshCw size={14} className={cn(followupMode === 'automatic' && "text-modern-primary")} />
+                    <RefreshCw size={12} className={cn(followupMode === 'automatic' && "text-modern-primary")} />
                     Automático
                   </button>
                   <button 
                     onClick={() => setFollowupMode('manual')}
                     className={cn(
-                      "flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all",
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
                       followupMode === 'manual' 
-                        ? "bg-white text-modern-primary shadow-sm" 
+                        ? "bg-white text-modern-primary shadow-xs" 
                         : "text-modern-secondary hover:text-modern-text"
                     )}
                   >
-                    <Clock size={14} className={cn(followupMode === 'manual' && "text-modern-primary")} />
+                    <Clock size={12} className={cn(followupMode === 'manual' && "text-modern-primary")} />
                     Manual
                   </button>
                 </div>
@@ -2474,29 +2477,29 @@ export default function App() {
 
               {followupMode === 'automatic' ? (
                 <>
-                  <div className="flex items-center justify-between col-span-full">
+                  <div className="flex items-center justify-between col-span-full gap-4">
                     <div>
-                      <h3 className="text-base font-bold text-modern-text">Retornos Automáticos</h3>
-                      <p className="text-xs text-modern-secondary">Clientes sugeridos pelo CRM com base nos prazos de compra, reloginho e faturas pendentes</p>
+                      <h3 className="text-sm font-bold text-modern-text">Retornos Automáticos</h3>
+                      <p className="text-[11px] text-modern-secondary">Sugeridos pelo CRM com base nos prazos de compra, reloginho e faturas pendentes</p>
                     </div>
-                    <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4 rounded-xl">
-                       <Clock size={20} className="text-modern-primary" />
+                    <div className="bg-white border border-modern-border px-3 py-2 shadow-xs flex items-center gap-2 rounded-lg shrink-0">
+                       <Clock size={16} className="text-modern-primary" />
                        <div>
-                         <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
-                         <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
+                         <p className="text-[8px] font-bold uppercase text-modern-secondary tracking-widest leading-none mb-0.5">Aguardando Retorno</p>
+                         <p className="text-base font-bold text-modern-text leading-none">{followupClients.length}</p>
                        </div>
                     </div>
                   </div>
 
-                  <div className="bg-white border border-modern-border overflow-hidden rounded-xl shadow-sm">
+                  <div className="bg-white border border-modern-border overflow-hidden rounded-lg shadow-sm">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-separate border-spacing-0">
                         <thead>
                           <tr className="bg-[#f8f9fa]">
-                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
-                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
-                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                            <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Lead</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2528,29 +2531,29 @@ export default function App() {
                             }
 
                             return (
-                              <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
-                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px] rounded-lg">
-                                      {client.nome.charAt(0)}
+                              <tr key={client.key} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-5 h-5 shrink-0 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-bold text-[9px] rounded-md">
+                                      {client.nome.charAt(0).toUpperCase()}
                                     </div>
                                     <div>
-                                      <p className="text-xs font-bold text-modern-text">{client.nome}</p>
-                                      <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                                      <p className="text-xs font-bold text-modern-text leading-tight">{client.nome}</p>
+                                      <p className="text-[9px] font-mono text-modern-secondary leading-none">{client.telefone}</p>
                                     </div>
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                                  <div className="flex items-center gap-2">
-                                     <AlertCircle size={14} className="text-orange-500" />
-                                     <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
+                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
+                                  <div className="flex items-center gap-1.5">
+                                     <AlertCircle size={12} className="text-orange-500 shrink-0" />
+                                     <span className="text-[10px] font-semibold text-modern-text uppercase tracking-tight">{reason}</span>
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                                   <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
+                                   <p className="text-xs font-semibold text-modern-secondary">{displayTime}</p>
                                 </td>
-                                <td className="px-4 py-4 border-b border-[#dadce0]">
-                                  <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                                <td className="px-2.5 py-1.5 border-b border-[#dadce0]">
+                                  <div className="flex items-center justify-center gap-1.5" onClick={e => e.stopPropagation()}>
                                      <button 
                                        onClick={(e) => {
                                          e.stopPropagation();
@@ -2558,16 +2561,16 @@ export default function App() {
                                          const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
                                          window.open(url, '_blank');
                                        }}
-                                       className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all rounded-lg shadow-sm font-semibold"
+                                       className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs"
                                      >
-                                       Chamar no Zap
+                                       Chamar Zap
                                      </button>
                                      <button 
                                        onClick={(e) => {
                                           e.stopPropagation();
                                           toggleTag(client.key, 'contato_sucesso');
                                        }}
-                                       className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all rounded-lg"
+                                       className="px-2 py-1 bg-white border border-modern-border text-modern-secondary text-[10px] font-bold uppercase hover:bg-slate-50 transition-all rounded-md"
                                      >
                                        Resolvido
                                      </button>
@@ -2578,9 +2581,9 @@ export default function App() {
                           })}
                           {followupClients.length === 0 && (
                             <tr>
-                              <td colSpan={4} className="px-4 py-20 text-center">
-                                <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
-                                <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
+                              <td colSpan={4} className="px-4 py-12 text-center">
+                                <Clock size={32} className="mx-auto text-modern-border mb-3 opacity-20" />
+                                <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
                               </td>
                             </tr>
                           )}
@@ -2592,9 +2595,9 @@ export default function App() {
               ) : (
                 /* Manual Mode Section */
                 <>
-                  <div className="bg-white border border-modern-border rounded-xl p-6 shadow-sm">
-                    <h3 className="text-base font-bold text-modern-text mb-4 flex items-center gap-2">
-                      <Plus size={18} className="text-modern-primary" />
+                  <div className="bg-white border border-modern-border rounded-lg p-4 shadow-xs">
+                    <h3 className="text-sm font-bold text-modern-text mb-3 flex items-center gap-1.5">
+                      <Plus size={16} className="text-modern-primary" />
                       Agendar Novo Follow-up Manual
                     </h3>
                     <form 
@@ -2607,29 +2610,31 @@ export default function App() {
                         addManualFollowup(
                           manualFollowupForm.name,
                           manualFollowupForm.phone,
-                          manualFollowupForm.date
+                          manualFollowupForm.date,
+                          manualFollowupForm.whatsappAccountId || undefined
                         );
                         setManualFollowupForm({
                           name: "",
                           phone: "",
-                          date: ""
+                          date: "",
+                          whatsappAccountId: ""
                         });
                       }}
-                      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+                      className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"
                     >
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Nome do Cliente</label>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Nome do Cliente</label>
                         <input 
                           type="text" 
                           required
                           placeholder="EX: Carlos Henrique"
                           value={manualFollowupForm.name}
                           onChange={(e) => setManualFollowupForm(prev => ({ ...prev, name: e.target.value }))}
-                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
+                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Telefone / WhatsApp</label>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Telefone / WhatsApp</label>
                         <input 
                           type="text" 
                           required
@@ -2639,77 +2644,92 @@ export default function App() {
                             const formatted = formatBrazilianPhone(e.target.value);
                             setManualFollowupForm(prev => ({ ...prev, phone: formatted }));
                           }}
-                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
+                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Data e Hora do Alarme</label>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Data e Hora do Alarme</label>
                         <input 
                           type="datetime-local" 
                           required
                           value={manualFollowupForm.date}
                           onChange={(e) => setManualFollowupForm(prev => ({ ...prev, date: e.target.value }))}
-                          className="w-full px-4 py-3 bg-white border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary text-modern-text focus:text-slate-900"
+                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text focus:text-slate-900"
                         />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">WhatsApp Utilizado</label>
+                        <select 
+                          value={manualFollowupForm.whatsappAccountId}
+                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: e.target.value }))}
+                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text"
+                        >
+                          <option value="">Nenhum / Padrão</option>
+                          {whatsappAccounts.map(acc => (
+                            <option key={acc.id} value={acc.id}>
+                              {acc.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <button 
                         type="submit"
-                        className="w-full py-3 px-6 bg-modern-primary hover:bg-modern-primary/90 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm font-semibold"
+                        className="w-full py-1.5 px-4 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center justify-center gap-1.5 shadow-xs"
                       >
-                        <Clock size={14} />
+                        <Clock size={12} />
                         Agendar Alarme
                       </button>
                     </form>
                   </div>
 
                   {activeAlarmCount > 0 && (
-                    <div className="bg-rose-50 border-2 border-rose-500 rounded-xl p-5 shadow-lg animate-pulse flex flex-col md:flex-row items-center justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-rose-500 text-white flex items-center justify-center">
-                          <Bell size={24} className="animate-bounce" />
+                    <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 animate-pulse flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0">
+                          <Bell size={16} className="animate-bounce" />
                         </div>
                         <div>
-                          <h4 className="text-base font-black text-rose-800 uppercase tracking-tight">Despertador de Follow-up Ativo!</h4>
-                          <p className="text-xs font-semibold text-rose-600 mt-0.5">Há {activeAlarmCount} contato(s) manual(is) agendado(s) para agora. O som continuará tocando até você clicar em "Enviado" neles.</p>
+                          <h4 className="text-xs font-bold text-rose-800 uppercase tracking-tight">Despertador de Follow-up Ativo!</h4>
+                          <p className="text-[10px] text-rose-600">Há {activeAlarmCount} contato(s) manual(is) agendado(s) para agora. O som tocará até clicar em "Marcar Enviado".</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button 
                           onClick={unlockAudioContext}
                           className={cn(
-                            "flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all shadow-md",
+                            "flex items-center gap-1.5 px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all shadow-xs",
                             unlockedAudio 
                               ? "bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200"
-                              : "bg-rose-600 text-white hover:bg-rose-700 hover:shadow-lg"
+                              : "bg-rose-600 text-white hover:bg-rose-700 hover:shadow-sm"
                           )}
                         >
-                          {unlockedAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                          {unlockedAudio ? "Áudio Ativado" : "Ativar Som do Alarme (Clique)"}
+                          {unlockedAudio ? <Volume2 size={12} /> : <VolumeX size={12} />}
+                          {unlockedAudio ? "Som Ativo" : "Ativar Som"}
                         </button>
                       </div>
                     </div>
                   )}
 
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-black uppercase tracking-widest text-modern-secondary flex items-center gap-2">
-                        <History size={16} />
+                      <h3 className="text-[11px] font-bold uppercase tracking-wider text-modern-secondary flex items-center gap-1.5">
+                        <History size={14} />
                         Lista de Follow-ups Manuais
                       </h3>
-                      <p className="text-xs text-modern-secondary font-bold uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-lg">
+                      <p className="text-[10px] text-modern-secondary font-bold uppercase tracking-wider bg-slate-100 px-2 py-1 rounded">
                         Total: {manualFollowups.length}
                       </p>
                     </div>
 
-                    <div className="bg-white border border-modern-border overflow-hidden rounded-xl shadow-sm">
+                    <div className="bg-white border border-modern-border overflow-hidden rounded-lg shadow-sm">
                       <div className="overflow-x-auto">
                         <table className="w-full text-left border-separate border-spacing-0">
                           <thead>
                             <tr className="bg-[#f8f9fa]">
-                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Cliente</th>
-                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Data Agendada</th>
-                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0] text-center">Status / Alarme</th>
-                              <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Cliente</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Data Agendada</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center">Status / Alarme</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2721,22 +2741,22 @@ export default function App() {
                               let statusBadge = null;
                               if (isSent) {
                                 statusBadge = (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest rounded-full">
-                                    <CheckCircle2 size={10} />
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider rounded">
+                                    <CheckCircle2 size={8} />
                                     Enviado
                                   </span>
                                 );
                               } else if (isRinging) {
                                 statusBadge = (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-500 text-white text-[9px] font-black uppercase tracking-widest rounded-full animate-pulse shadow-sm">
-                                    <Bell size={10} className="animate-spin" />
-                                    TOCANDO ALARME!
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-bold uppercase tracking-wider rounded animate-pulse shadow-xs">
+                                    <Bell size={8} className="animate-spin" />
+                                    TOCANDO!
                                   </span>
                                 );
                               } else {
                                 statusBadge = (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 text-[9px] font-black uppercase tracking-widest rounded-full">
-                                    <Clock size={10} />
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider rounded">
+                                    <Clock size={8} />
                                     Agendado
                                   </span>
                                 );
@@ -2749,30 +2769,42 @@ export default function App() {
                                 formattedDateStr = item.date;
                               }
 
+                              const assignedAcc = item.whatsappAccountId ? whatsappAccounts.find(a => a.id === item.whatsappAccountId) : null;
+
                               return (
-                                <tr key={item.id} className={cn("transition-all", isRinging ? "bg-rose-50/50 hover:bg-rose-50 animate-pulse" : "hover:bg-slate-50")}>
-                                  <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                                    <div className="flex items-center gap-3">
+                                <tr key={item.id} className={cn("transition-colors", isRinging ? "bg-rose-50/50 hover:bg-rose-50 animate-pulse" : "hover:bg-slate-50")}>
+                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
+                                    <div className="flex items-center gap-2">
                                       <div className={cn(
-                                        "w-8 h-8 flex items-center justify-center font-black text-[11px] rounded-lg",
+                                        "w-5 h-5 flex items-center justify-center font-bold text-[9px] rounded-md shrink-0",
                                         isRinging ? "bg-rose-100 text-rose-600" : "bg-modern-primary/10 text-modern-primary"
                                       )}>
                                         {item.name.charAt(0).toUpperCase()}
                                       </div>
                                       <div>
-                                        <p className="text-xs font-bold text-modern-text">{item.name}</p>
-                                        <p className="text-[10px] text-modern-secondary">{item.phone}</p>
+                                        <p className="text-xs font-bold text-modern-text leading-tight">{item.name}</p>
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                          <p className="text-[9px] font-mono text-modern-secondary leading-none">{item.phone}</p>
+                                          {assignedAcc && (
+                                            <span 
+                                              className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded text-white shadow-xs"
+                                              style={{ backgroundColor: assignedAcc.color || '#3b82f6' }}
+                                            >
+                                              {assignedAcc.name}
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                                    <p className="text-xs font-bold text-modern-text">{formattedDateStr}</p>
+                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
+                                    <p className="text-xs font-semibold text-modern-text">{formattedDateStr}</p>
                                   </td>
-                                  <td className="px-4 py-4 border-b border-r border-[#dadce0] text-center">
+                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0] text-center">
                                     {statusBadge}
                                   </td>
-                                  <td className="px-4 py-4 border-b border-[#dadce0]">
-                                    <div className="flex items-center justify-center gap-2">
+                                  <td className="px-2.5 py-1.5 border-b border-[#dadce0]">
+                                    <div className="flex items-center justify-center gap-1.5">
                                       <button 
                                         onClick={() => {
                                           const msg = `Olá ${item.name}, estou passando para realizar o seu follow-up agendado!`;
@@ -2780,16 +2812,16 @@ export default function App() {
                                           const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
                                           window.open(url, '_blank');
                                         }}
-                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest transition-all rounded-lg shadow-sm font-semibold"
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs"
                                         title="Chamar Cliente no WhatsApp"
                                       >
-                                        Chamar no Zap
+                                        Chamar Zap
                                       </button>
                                       
                                       {item.status === 'pending' ? (
                                         <button 
                                           onClick={() => updateManualFollowupStatus(item.id, 'sent')}
-                                          className="px-3 py-1.5 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-black uppercase tracking-widest transition-all rounded-lg shadow-sm flex items-center gap-1 font-semibold"
+                                          className="px-2 py-1 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs flex items-center gap-1"
                                           title="Marcar como Enviado"
                                         >
                                           Marcar Enviado
@@ -2797,7 +2829,7 @@ export default function App() {
                                       ) : (
                                         <button 
                                           onClick={() => updateManualFollowupStatus(item.id, 'pending')}
-                                          className="px-3 py-1.5 bg-slate-100 border border-slate-300 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all rounded-lg flex items-center gap-1 font-semibold"
+                                          className="px-2 py-1 bg-slate-100 border border-slate-300 text-slate-600 text-[10px] font-bold uppercase hover:bg-slate-200 transition-all rounded-md flex items-center gap-1"
                                           title="Voltar para Agendado"
                                         >
                                           Reabrir
@@ -2810,10 +2842,10 @@ export default function App() {
                                             deleteManualFollowup(item.id);
                                           }
                                         }}
-                                        className="p-1 px-2.5 text-rose-500 hover:text-rose-700 rounded-lg border border-transparent hover:border-slate-200 transition-all"
+                                        className="p-1 px-2 text-rose-500 hover:text-rose-700 rounded-md border border-transparent hover:border-slate-200 transition-all"
                                         title="Excluir agendamento"
                                       >
-                                        <Trash2 size={14} />
+                                        <Trash2 size={12} />
                                       </button>
                                     </div>
                                   </td>
@@ -2822,10 +2854,10 @@ export default function App() {
                             })}
                             {manualFollowups.length === 0 && (
                               <tr>
-                                <td colSpan={4} className="px-4 py-20 text-center">
-                                  <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
-                                  <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Nenhum follow-up manual cadastrado.</p>
-                                  <p className="text-xs text-modern-secondary/60 mt-1">Insira um cliente acima para agendar o despertador.</p>
+                                <td colSpan={4} className="px-4 py-12 text-center">
+                                  <Clock size={32} className="mx-auto text-modern-border mb-3 opacity-20" />
+                                  <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Nenhum follow-up manual cadastrado.</p>
+                                  <p className="text-[10px] text-modern-secondary/60 mt-0.5">Insira um cliente acima para agendar o despertador.</p>
                                 </td>
                               </tr>
                             )}
