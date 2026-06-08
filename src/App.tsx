@@ -3643,22 +3643,35 @@ export default function App() {
                             )}>
                               {client.status}
                             </div>
-                            <div className={cn(
-                              "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center",
-                              !currentTag ? "bg-[#DBEAFE] text-blue-700" :
-                              (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
-                              (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700" :
-                              currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700" :
-                              currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700" :
-                              "bg-slate-100 text-slate-600"
-                            )}>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!client.telefone) return;
+                                let msg = `Olá ${client.nome}, tudo bem? Vi o seu interesse em nosso produto e passamos para saber se podemos lhe ajudar com algo a mais.`;
+                                if (currentTag === 'reloginho' || currentTag === 'pendente') {
+                                  msg = `Olá ${client.nome}, tudo bem? Estou passando para dar continuidade ao nosso contato!`;
+                                }
+                                const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                window.open(url, '_blank');
+                              }}
+                              className={cn(
+                                "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer",
+                                !currentTag ? "bg-[#DBEAFE] text-blue-700 hover:bg-[#bfdbfe]" :
+                                (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700 hover:bg-[#fef08a]" : 
+                                (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700 hover:bg-[#a7f3d0]" :
+                                currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700 hover:bg-gray-200" :
+                                currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700 hover:bg-[#fecdd3]" :
+                                "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              )}
+                              title="Chamar no WhatsApp"
+                            >
                               {!currentTag ? 'Enviar Msg' : 
                                (currentTag === 'pendente' || currentTag === 'reloginho') ? 'Pendente' : 
                                (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? 'Sucesso' : 
                                currentTag === 'contato_falha' ? 'C. Falha' :
                                currentTag === 'lixo' ? 'Lixo' :
                                'Status'}
-                            </div>
+                            </button>
                             {lastLead?.tags && (
                               <div className="px-1.5 py-0.5 rounded-[4px] bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
                                 {lastLead.tags}
