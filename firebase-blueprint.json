@@ -53,21 +53,6 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["clientKey", "updatedAt"]
-    },
-    "ManualFollowup": {
-      "title": "Manual Followup",
-      "description": "Manual follow-ups with a scheduled alarm",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "phone": { "type": "string" },
-        "date": { "type": "string" },
-        "status": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "whatsappAccountId": { "type": "string" }
-      },
-      "required": ["id", "name", "phone", "date", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -86,10 +71,6 @@
     "/users/{userId}/clientData/{clientKey}": {
       "schema": "ClientData",
       "description": "Extra client-specific data"
-    },
-    "/users/{userId}/manualFollowups/{followupId}": {
-      "schema": "ManualFollowup",
-      "description": "Manual follow-up list with alert dates"
     }
   }
 }

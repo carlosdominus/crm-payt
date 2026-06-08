@@ -32,10 +32,6 @@ import {
   AlertCircle,
   Hash,
   ShoppingBag,
-  Bell,
-  BellOff,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format, differenceInHours, differenceInDays } from 'date-fns';
@@ -62,7 +58,7 @@ import {
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog, ManualFollowup } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -144,20 +140,6 @@ const isValidPhone = (phone: string): boolean => {
     return cleaned.startsWith('55');
   }
   return false;
-};
-
-const formatBrazilianPhone = (value: string): string => {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length <= 2) {
-    return digits;
-  }
-  if (digits.length <= 6) {
-    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-  }
-  if (digits.length <= 10) {
-    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-  }
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 };
 
 const isNameless = (name?: string): boolean => {
@@ -500,70 +482,6 @@ const determineActiveStatus = (leads: Lead[]): string => {
   return bestLead.status;
 };
 
-let alarmAudioContext: AudioContext | null = null;
-let alarmInterval: any = null;
-
-const startAlarmSound = () => {
-  if (alarmInterval) return; // already beeping
-  
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!alarmAudioContext && AudioContextClass) {
-      alarmAudioContext = new AudioContextClass();
-    }
-  } catch (e) {
-    console.error("Audio Context failed to start:", e);
-  }
-
-  alarmInterval = setInterval(() => {
-    try {
-      if (!alarmAudioContext) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContextClass) alarmAudioContext = new AudioContextClass();
-      }
-      if (alarmAudioContext) {
-        if (alarmAudioContext.state === 'suspended') {
-          alarmAudioContext.resume();
-        }
-        
-        const osc1 = alarmAudioContext.createOscillator();
-        const osc2 = alarmAudioContext.createOscillator();
-        const gainNode = alarmAudioContext.createGain();
-        
-        osc1.connect(gainNode);
-        osc2.connect(gainNode);
-        gainNode.connect(alarmAudioContext.destination);
-        
-        osc1.type = 'sine';
-        osc1.frequency.setValueAtTime(900, alarmAudioContext.currentTime);
-        osc1.frequency.exponentialRampToValueAtTime(1200, alarmAudioContext.currentTime + 0.25);
-        
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(450, alarmAudioContext.currentTime);
-        osc2.frequency.exponentialRampToValueAtTime(600, alarmAudioContext.currentTime + 0.25);
-        
-        gainNode.gain.setValueAtTime(0.2, alarmAudioContext.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.01, alarmAudioContext.currentTime + 0.35);
-        
-        osc1.start();
-        osc2.start();
-        
-        osc1.stop(alarmAudioContext.currentTime + 0.4);
-        osc2.stop(alarmAudioContext.currentTime + 0.4);
-      }
-    } catch (e) {
-      console.warn("Alarm chime failed to play:", e);
-    }
-  }, 900);
-};
-
-const stopAlarmSound = () => {
-  if (alarmInterval) {
-    clearInterval(alarmInterval);
-    alarmInterval = null;
-  }
-};
-
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [top10Copied, setTop10Copied] = useState(false);
@@ -586,16 +504,7 @@ export default function App() {
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
-  const [followupMode, setFollowupMode] = useState<'automatic' | 'manual'>('automatic');
-  const [manualFollowups, setManualFollowups] = useState<ManualFollowup[]>([]);
-  const [manualFollowupForm, setManualFollowupForm] = useState({
-    name: "",
-    phone: "",
-    date: "",
-    whatsappAccountId: ""
-  });
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
-  const [isManualZapDropdownOpen, setIsManualZapDropdownOpen] = useState(false);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
@@ -607,22 +516,15 @@ export default function App() {
     identifier: ""
   });
 
-  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
-
   const getClientTag = (client: Client) => {
     // 1. Manual tag from Firestore (highest priority)
     const manualTag = clientTags[client.key];
     if (manualTag) return manualTag;
 
-    // 2. Automatic 'Vendido' detection
-    // If they have manual sales recorded OR if their status/lead indicates an approved purchase
-    const hasManualSales = client.manualSales && client.manualSales.length > 0;
-    const isApprovedFromSpreadsheet = client.status === 'Aprovado' || client.leads.some(l => l.status === 'Aprovado');
-    const hasSpentMoney = (client.totalSpent || 0) > 0;
-
-    if (hasManualSales || isApprovedFromSpreadsheet || hasSpentMoney) {
-      return 'vendido';
-    }
+    // 2. Automatic 'Vendido' detection (ONLY if they have MANUAL sales recorded)
+    // This ensures that approved leads from the spreadsheet still show "Enviar Msg"
+    // until a manual interaction/sale is logged.
+    if (client.manualSales && client.manualSales.length > 0) return 'vendido';
 
     // 3. Explicit 'Lixo' status in Spreadsheet
     if (client.status === 'Lixo' || client.leads.some(l => l.status === 'Lixo')) {
@@ -1303,152 +1205,6 @@ export default function App() {
     return () => unsubscribe();
   }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
 
-  // Sync Manual Followups
-  useEffect(() => {
-    if (!authReady || !effectiveWorkspaceId) return;
-
-    if (!user) {
-      const saved = localStorage.getItem('crm_manual_followups');
-      if (saved) {
-        try {
-          setManualFollowups(JSON.parse(saved));
-        } catch (e) {
-          console.error("Erro ao carregar follow-ups manuais locais:", e);
-        }
-      }
-      return;
-    }
-
-    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/manualFollowups`), (snapshot) => {
-      const followups: ManualFollowup[] = [];
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        followups.push({
-          id: doc.id,
-          name: data.name || '',
-          phone: data.phone || '',
-          date: data.date || '',
-          status: data.status || 'pending',
-          createdAt: data.createdAt || '',
-          whatsappAccountId: data.whatsappAccountId || ''
-        });
-      });
-      // Sort in-order of creation or scheduled date
-      followups.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
-      setManualFollowups(followups);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/manualFollowups`);
-    });
-
-    return () => unsubscribe();
-  }, [authReady, user, effectiveWorkspaceId]);
-
-  const addManualFollowup = async (name: string, phone: string, date: string, whatsappAccountId?: string) => {
-    const id = Date.now().toString();
-    const newFollowup: ManualFollowup = {
-      id,
-      name,
-      phone,
-      date, // YYYY-MM-DDTHH:mm
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      ...(whatsappAccountId ? { whatsappAccountId } : {})
-    };
-
-    if (!user) {
-      const updated = [newFollowup, ...manualFollowups];
-      setManualFollowups(updated);
-      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
-      return;
-    }
-
-    if (!effectiveWorkspaceId) return;
-    try {
-      await setDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id), newFollowup);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
-    }
-  };
-
-  const updateManualFollowupStatus = async (id: string, status: 'pending' | 'sent') => {
-    if (!user) {
-      const updated = manualFollowups.map(item => item.id === id ? { ...item, status } : item);
-      setManualFollowups(updated);
-      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
-      return;
-    }
-
-    if (!effectiveWorkspaceId) return;
-    try {
-      await setDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id), { status }, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
-    }
-  };
-
-  const deleteManualFollowup = async (id: string) => {
-    if (!user) {
-      const updated = manualFollowups.filter(item => item.id !== id);
-      setManualFollowups(updated);
-      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
-      return;
-    }
-
-    if (!effectiveWorkspaceId) return;
-    try {
-      await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/manualFollowups/${id}`);
-    }
-  };
-
-  // Alarm mechanism states
-  const [activeAlarmCount, setActiveAlarmCount] = useState(0);
-  const [unlockedAudio, setUnlockedAudio] = useState(false);
-
-  const unlockAudioContext = () => {
-    try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!alarmAudioContext && AudioContextClass) {
-        alarmAudioContext = new AudioContextClass();
-      }
-      if (alarmAudioContext) {
-        alarmAudioContext.resume().then(() => {
-          setUnlockedAudio(true);
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao habilitar áudio:", e);
-    }
-  };
-
-  // Alarm Checker Effect
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const ringing = manualFollowups.filter(f => {
-        if (f.status !== 'pending' || !f.date) return false;
-        try {
-          return new Date(f.date).getTime() <= Date.now();
-        } catch (e) {
-          return false;
-        }
-      });
-
-      setActiveAlarmCount(ringing.length);
-
-      if (ringing.length > 0) {
-        startAlarmSound();
-      } else {
-        stopAlarmSound();
-      }
-    }, 1000);
-
-    return () => {
-      clearInterval(interval);
-      stopAlarmSound();
-    };
-  }, [manualFollowups]);
-
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
     
@@ -2038,30 +1794,6 @@ export default function App() {
     });
   }, [clients, manualSales, clientExtraData]);
 
-  const clientSuggestions = useMemo(() => {
-    const nameQuery = manualFollowupForm.name.trim().toLowerCase();
-    const phoneQuery = manualFollowupForm.phone.replace(/\D/g, '');
-    
-    if (!nameQuery && !phoneQuery) return [];
-    
-    return enrichedClients.filter(client => {
-      const nameMatch = nameQuery ? client.nome.toLowerCase().includes(nameQuery) : false;
-      const cleanClientPhone = client.telefone ? client.telefone.replace(/\D/g, '') : '';
-      const phoneMatch = phoneQuery ? cleanClientPhone.includes(phoneQuery) : false;
-      return nameMatch || phoneMatch;
-    }).slice(0, 8);
-  }, [manualFollowupForm.name, manualFollowupForm.phone, enrichedClients]);
-
-  const handleSelectSuggestedClient = (client: Client) => {
-    setManualFollowupForm(prev => ({
-      ...prev,
-      name: client.nome,
-      phone: formatBrazilianPhone(client.telefone),
-      whatsappAccountId: client.assignedWhatsappId || ""
-    }));
-    setShowClientSuggestions(false);
-  };
-
   const filteredClients = useMemo(() => {
     const now = new Date();
     let start: Date | null = null;
@@ -2463,762 +2195,121 @@ export default function App() {
         
         <div className="flex-1 overflow-hidden flex flex-col">
           {view === 'followup' ? (
-            <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-modern-border">
+            <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-modern-text flex items-center gap-2">
-                    Dashboard de Follow-up
-                    {activeAlarmCount > 0 && (
-                      <span className="flex h-3 w-3 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
-                      </span>
-                    )}
-                  </h2>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-modern-secondary mt-0.5">Acompanhamento e lembretes de clientes para conversão</p>
+                  <h2 className="text-2xl font-bold text-modern-text">Dashboard de Follow-up</h2>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Leads aguardando retorno baseado em regras de tempo</p>
                 </div>
-
-                {/* Switch between Automatic/Manual */}
-                <div className="flex bg-slate-100 p-1 rounded-lg">
-                  <button 
-                    onClick={() => setFollowupMode('automatic')}
-                    className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
-                      followupMode === 'automatic' 
-                        ? "bg-white text-modern-primary shadow-xs" 
-                        : "text-modern-secondary hover:text-modern-text"
-                    )}
-                  >
-                    <RefreshCw size={12} className={cn(followupMode === 'automatic' && "text-modern-primary")} />
-                    Automático
-                  </button>
-                  <button 
-                    onClick={() => setFollowupMode('manual')}
-                    className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all",
-                      followupMode === 'manual' 
-                        ? "bg-white text-modern-primary shadow-xs" 
-                        : "text-modern-secondary hover:text-modern-text"
-                    )}
-                  >
-                    <Clock size={12} className={cn(followupMode === 'manual' && "text-modern-primary")} />
-                    Manual
-                  </button>
+                <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4">
+                   <Clock size={20} className="text-modern-primary" />
+                   <div>
+                     <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
+                     <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
+                   </div>
                 </div>
               </div>
 
-              {followupMode === 'automatic' ? (
-                <>
-                  <div className="flex items-center justify-between col-span-full gap-4">
-                    <div>
-                      <h3 className="text-sm font-bold text-modern-text">Retornos Automáticos</h3>
-                      <p className="text-[11px] text-modern-secondary">Sugeridos pelo CRM com base nos prazos de compra, reloginho e faturas pendentes</p>
-                    </div>
-                    <div className="bg-white border border-modern-border px-3 py-2 shadow-xs flex items-center gap-2 rounded-lg shrink-0">
-                       <Clock size={16} className="text-modern-primary" />
-                       <div>
-                         <p className="text-[8px] font-bold uppercase text-modern-secondary tracking-widest leading-none mb-0.5">Aguardando Retorno</p>
-                         <p className="text-base font-bold text-modern-text leading-none">{followupClients.length}</p>
-                       </div>
-                    </div>
-                  </div>
+              <div className="bg-white border border-modern-border overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-[#f8f9fa]">
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {followupClients.map(client => {
+                        const tag = clientTags[client.key];
+                        const tagDateStr = tagTimestamps[client.key];
+                        const pStatus = paymentStatuses[client.key];
+                        const potCount = potsCounts[client.key];
+                        const now = new Date();
 
-                  <div className="bg-white border border-modern-border overflow-hidden rounded-lg shadow-sm">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-separate border-spacing-0">
-                        <thead>
-                          <tr className="bg-[#f8f9fa]">
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-36">Ações</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-12">Zap</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Lead</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Motivo Follow-up</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações Zap</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {followupClients.map(client => {
-                            const clientKey = client.key;
-                            const tag = clientTags[clientKey];
-                            const currentTag = getClientTag(client);
-                            const tagDateStr = tagTimestamps[clientKey];
-                            const pStatus = paymentStatuses[clientKey];
-                            const potCount = potsCounts[clientKey];
-                            const now = new Date();
-                            const lastLead = client.leads[0];
-                            const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
-
-                            let reason = "";
-                            let displayTime = "";
-                            
-                            if (tag === 'reloginho' && tagDateStr) {
-                               reason = "Follow-up Manual (Reloginho)";
-                               displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
-                            } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
-                               reason = "Cobrança de Pix Enviado";
-                               displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                            } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
-                               reason = "Cobrança de Link de Pagamento";
-                               displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                            } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
-                               reason = "Cobrança de Boleto";
-                               displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
-                            } else if (potCount > 0 && client.lastPurchaseDate) {
-                               reason = `Recompra - ${potCount} Pote(s)`;
-                               displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
-                            }
-
-                            return (
-                              <tr key={client.key} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
-                                {/* Ações Column (standard 6-icon buttons exactly like main table) */}
-                                <td className="px-2.5 py-1 border-b border-r border-[#dadce0]" onClick={(e) => e.stopPropagation()}>
-                                  <div className="flex items-center justify-center gap-1">
-                                    {client.telefone && (
-                                      <button 
-                                        onClick={() => {
-                                          const prod = lastLead?.produto || 'Sem produto';
-                                          const status = client.status || 'Sem status';
-                                          copyToClipboard(`${client.nome} - ${client.telefone} - ${prod} - ${status}`);
-                                        }}
-                                        className="w-5 h-5 rounded flex items-center justify-center transition-shadow border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50 shadow-xs"
-                                        title="Copiar Nome + Tel + Produto + Status"
-                                      >
-                                        <Copy size={11} />
-                                      </button>
-                                    )}
-                                    <button 
-                                      onClick={() => toggleTag(clientKey, 'reloginho')}
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                        currentTag === 'reloginho' 
-                                          ? "bg-amber-100 border-amber-200 text-amber-600 font-bold" 
-                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                      )}
-                                      title="Pendente (Follow-up)"
-                                    >
-                                      <Clock size={11} />
-                                    </button>
-                                    <button 
-                                      onClick={() => toggleTag(clientKey, 'contato_sucesso')}
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                        currentTag === 'contato_sucesso' 
-                                          ? "bg-emerald-100 border-emerald-200 text-emerald-600 font-bold" 
-                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                      )}
-                                      title="Contato Bem Sucedido"
-                                    >
-                                      <UserCheck size={11} />
-                                    </button>
-                                    <button 
-                                      onClick={() => toggleTag(clientKey, 'contato_falha')}
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                        currentTag === 'contato_falha' 
-                                          ? "bg-gray-100 border-gray-300 text-gray-800 font-bold" 
-                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                      )}
-                                      title="Contato Mal Sucedido"
-                                    >
-                                      <UserX size={11} />
-                                    </button>
-                                    <button 
-                                      onClick={() => toggleTag(clientKey, 'vendido')}
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                        currentTag === 'vendido' 
-                                          ? "bg-emerald-500 border-emerald-600 text-white font-bold" 
-                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                      )}
-                                      title="Vendido"
-                                    >
-                                      <CheckCircle2 size={11} />
-                                    </button>
-                                    <button 
-                                      onClick={() => toggleTag(clientKey, 'lixo')}
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                        currentTag === 'lixo' 
-                                          ? "bg-rose-100 border-rose-200 text-rose-600 font-bold" 
-                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                      )}
-                                      title="Lixo (Número Inválido)"
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </div>
-                                </td>
-
-                                {/* Zap column identifier color badge */}
-                                <td className="px-2.5 py-1 border-b border-r border-[#dadce0] text-center" onClick={(e) => e.stopPropagation()}>
-                                  <div className="flex items-center justify-center">
-                                    <div 
-                                      className={cn(
-                                        "w-5 h-5 rounded flex items-center justify-center transition-colors text-[9px] font-black border shadow-xs text-white",
-                                        assignedAcc ? "" : "bg-white border-[#dadce0] text-[#5f6368]"
-                                      )}
-                                      style={assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
-                                    >
-                                      {assignedAcc ? assignedAcc.identifier : <Phone size={10} />}
-                                    </div>
-                                  </div>
-                                </td>
-
-                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-5 h-5 shrink-0 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-bold text-[9px] rounded-md">
-                                      {client.nome.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-bold text-modern-text leading-tight">{client.nome}</p>
-                                      <p className="text-[9px] font-mono text-modern-secondary leading-none">{client.telefone}</p>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
-                                  <div className="flex items-center gap-1.5">
-                                     <AlertCircle size={12} className="text-orange-500 shrink-0" />
-                                     <span className="text-[10px] font-semibold text-modern-text uppercase tracking-tight">{reason}</span>
-                                  </div>
-                                </td>
-                                <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
-                                   <p className="text-xs font-semibold text-modern-secondary">{displayTime}</p>
-                                </td>
-                                <td className="px-2.5 py-1.5 border-b border-[#dadce0]">
-                                  <div className="flex items-center justify-center gap-1.5" onClick={e => e.stopPropagation()}>
-                                     <button 
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         const msg = `Olá ${client.nome}, tudo bem? Vi o seu interesse em nosso produto e passamos para saber se podemos lhe ajudar com algo a mais.`;
-                                         const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                         window.open(url, '_blank');
-                                       }}
-                                       className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs"
-                                     >
-                                       Chamar Zap
-                                     </button>
-                                     <button 
-                                       onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleTag(client.key, 'contato_sucesso');
-                                       }}
-                                       className="px-2 py-1 bg-white border border-modern-border text-modern-secondary text-[10px] font-bold uppercase hover:bg-slate-50 transition-all rounded-md"
-                                     >
-                                       Resolvido
-                                     </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {followupClients.length === 0 && (
-                            <tr>
-                              <td colSpan={6} className="px-4 py-12 text-center">
-                                <Clock size={32} className="mx-auto text-modern-border mb-3 opacity-20" />
-                                <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                /* Manual Mode Section */
-                <>
-                  <div className="bg-white border border-modern-border rounded-lg p-4 shadow-xs">
-                    <h3 className="text-sm font-bold text-modern-text mb-3 flex items-center gap-1.5">
-                      <Plus size={16} className="text-modern-primary" />
-                      Agendar Novo Follow-up Manual
-                    </h3>
-                    <form 
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        if (!manualFollowupForm.name || !manualFollowupForm.phone || !manualFollowupForm.date) {
-                          alert("Por favor, preencha todos os campos do agendamento (Nome, Telefone, Data e Hora).");
-                          return;
-                        }
-                        addManualFollowup(
-                          manualFollowupForm.name,
-                          manualFollowupForm.phone,
-                          manualFollowupForm.date,
-                          manualFollowupForm.whatsappAccountId || undefined
-                        );
-                        setManualFollowupForm({
-                          name: "",
-                          phone: "",
-                          date: "",
-                          whatsappAccountId: ""
-                        });
-                      }}
-                      className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"
-                    >
-                      <div className="space-y-1 relative">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Nome do Cliente</label>
-                        <input 
-                          type="text" 
-                          required
-                          placeholder="EX: Carlos Henrique"
-                          value={manualFollowupForm.name}
-                          onChange={(e) => {
-                            setManualFollowupForm(prev => ({ ...prev, name: e.target.value }));
-                            setShowClientSuggestions(true);
-                          }}
-                          onFocus={() => setShowClientSuggestions(true)}
-                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
-                        />
+                        let reason = "";
+                        let displayTime = "";
                         
-                        {showClientSuggestions && clientSuggestions.length > 0 && (
-                          <>
-                            {/* Simple transparent background clickaway overlay */}
-                            <div className="fixed inset-0 z-[290]" onClick={() => setShowClientSuggestions(false)} />
-                            <div className="absolute left-0 right-0 md:w-[210%] mt-1 max-h-60 overflow-y-auto bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.2)] rounded-lg z-[300] custom-scrollbar py-1">
-                              <div className="px-2.5 py-1 text-[8px] font-bold uppercase text-slate-400 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                                <span>Selecionar Cliente Existente</span>
-                                <span>{clientSuggestions.length} encontrados</span>
+                        if (tag === 'reloginho' && tagDateStr) {
+                           reason = "Follow-up Manual (Reloginho)";
+                           displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
+                        } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Pix Enviado";
+                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                        } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Link de Pagamento";
+                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                        } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+                           reason = "Cobrança de Boleto";
+                           displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
+                        } else if (potCount > 0 && client.lastPurchaseDate) {
+                           reason = `Recompra - ${potCount} Pote(s)`;
+                           displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
+                        }
+
+                        return (
+                          <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
+                                  {client.nome.charAt(0)}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-modern-text">{client.nome}</p>
+                                  <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                                </div>
                               </div>
-                              {clientSuggestions.map(client => {
-                                const matchedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
-                                return (
-                                  <button
-                                    key={client.key}
-                                    type="button"
-                                    onClick={() => handleSelectSuggestedClient(client)}
-                                    className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex flex-col gap-0.5 border-b border-slate-50 last:border-b-0 cursor-pointer"
-                                  >
-                                    <div className="flex items-center justify-between w-full">
-                                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[130px]">{client.nome}</span>
-                                      {matchedAcc && (
-                                        <span 
-                                          className="text-[8px] font-black uppercase text-white px-1.5 py-0.2 rounded shrink-0 shadow-xs scale-90"
-                                          style={{ backgroundColor: matchedAcc.color }}
-                                        >
-                                          {matchedAcc.name}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                                      <span>{formatBrazilianPhone(client.telefone)}</span>
-                                      {client.email && (
-                                        <>
-                                          <span className="opacity-40">•</span>
-                                          <span className="truncate max-w-[150px]">{client.email}</span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Telefone / WhatsApp</label>
-                        <input 
-                          type="text" 
-                          required
-                          placeholder="EX: (11) 98765-4321"
-                          value={manualFollowupForm.phone}
-                          onChange={(e) => {
-                            const formatted = formatBrazilianPhone(e.target.value);
-                            setManualFollowupForm(prev => ({ ...prev, phone: formatted }));
-                            setShowClientSuggestions(true);
-                          }}
-                          onFocus={() => setShowClientSuggestions(true)}
-                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Data e Hora do Alarme</label>
-                        <input 
-                          type="datetime-local" 
-                          required
-                          value={manualFollowupForm.date}
-                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, date: e.target.value }))}
-                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text focus:text-slate-900"
-                        />
-                      </div>
-                      {/* Custom dropdown selection block with colors, numbers & origin */}
-                      <div className="space-y-1 relative">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">WhatsApp Utilizado</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() => setIsManualZapDropdownOpen(!isManualZapDropdownOpen)}
-                            className="w-full flex items-center justify-between px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text"
-                          >
-                            <div className="flex items-center gap-2">
-                              {(() => {
-                                const selectedAcc = whatsappAccounts.find(a => a.id === manualFollowupForm.whatsappAccountId);
-                                if (selectedAcc) {
-                                  return (
-                                    <>
-                                      <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-black text-white shrink-0 shadow-xs" style={{ backgroundColor: selectedAcc.color }}>
-                                        {selectedAcc.identifier}
-                                      </div>
-                                      <span className="truncate">{selectedAcc.name}</span>
-                                    </>
-                                  );
-                                }
-                                return (
-                                  <>
-                                    <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100 text-[#5f6368] shrink-0 border border-[#dadce0]">
-                                      <Phone size={10} />
-                                    </div>
-                                    <span className="truncate">Nenhum / Padrão</span>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                            <ChevronDown size={14} className="text-[#5f6368]" />
-                          </button>
-                          
-                          {isManualZapDropdownOpen && (
-                            <>
-                              {/* Overlay for clicking away */}
-                              <div className="fixed inset-0 z-[290]" onClick={() => setIsManualZapDropdownOpen(false)} />
-                              <div className="absolute left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.2)] rounded-lg z-[300] custom-scrollbar py-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: "" }));
-                                    setIsManualZapDropdownOpen(false);
-                                  }}
-                                  className={cn(
-                                    "w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 flex items-center gap-2 transition-colors",
-                                    !manualFollowupForm.whatsappAccountId && "bg-slate-50 font-bold"
-                                  )}
-                                >
-                                  <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100 text-[#5f6368] shrink-0 border border-[#dadce0]">
-                                    <Phone size={10} />
-                                  </div>
-                                  <span>Nenhum / Padrão</span>
-                                </button>
-                                
-                                {whatsappAccounts.map(acc => (
-                                  <button
-                                    key={acc.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: acc.id }));
-                                      setIsManualZapDropdownOpen(false);
-                                    }}
-                                    className={cn(
-                                      "w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 flex items-center gap-3 transition-colors",
-                                      manualFollowupForm.whatsappAccountId === acc.id && "bg-emerald-50/50 font-bold"
-                                    )}
-                                  >
-                                    <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-black text-white shrink-0 shadow-xs" style={{ backgroundColor: acc.color }}>
-                                      {acc.identifier}
-                                    </div>
-                                    <div className="flex flex-col min-w-0">
-                                      <span className="truncate leading-none mb-0.5 text-modern-text">{acc.name}</span>
-                                      <span className="text-[7px] uppercase text-modern-secondary tracking-widest leading-none opacity-60">{acc.origin}</span>
-                                    </div>
-                                  </button>
-                                ))}
+                            </td>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                              <div className="flex items-center gap-2">
+                                 <AlertCircle size={14} className="text-orange-500" />
+                                 <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
                               </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <button 
-                        type="submit"
-                        className="w-full py-1.5 px-4 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center justify-center gap-1.5 shadow-xs"
-                      >
-                        <Clock size={12} />
-                        Agendar Alarme
-                      </button>
-                    </form>
-                  </div>
-
-                  {activeAlarmCount > 0 && (
-                    <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 animate-pulse flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0">
-                          <Bell size={16} className="animate-bounce" />
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-rose-800 uppercase tracking-tight">Despertador de Follow-up Ativo!</h4>
-                          <p className="text-[10px] text-rose-600">Há {activeAlarmCount} contato(s) manual(is) agendado(s) para agora. O som tocará até clicar em "Marcar Enviado".</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button 
-                          onClick={unlockAudioContext}
-                          className={cn(
-                            "flex items-center gap-1.5 px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all shadow-xs",
-                            unlockedAudio 
-                              ? "bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200"
-                              : "bg-rose-600 text-white hover:bg-rose-700 hover:shadow-sm"
-                          )}
-                        >
-                          {unlockedAudio ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                          {unlockedAudio ? "Som Ativo" : "Ativar Som"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-[11px] font-bold uppercase tracking-wider text-modern-secondary flex items-center gap-1.5">
-                        <History size={14} />
-                        Lista de Follow-ups Manuais
-                      </h3>
-                      <p className="text-[10px] text-modern-secondary font-bold uppercase tracking-wider bg-slate-100 px-2 py-1 rounded">
-                        Total: {manualFollowups.length}
-                      </p>
-                    </div>
-
-                    <div className="bg-white border border-modern-border overflow-hidden rounded-lg shadow-sm">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-separate border-spacing-0">
-                          <thead>
-                            <tr className="bg-[#f8f9fa]">
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-36">Ações</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-12">Zap</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Cliente</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Data Agendada</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center">Status / Alarme</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações Zap</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {manualFollowups.map(item => {
-                              const isRinging = item.status === 'pending' && new Date(item.date).getTime() <= Date.now();
-                              const isSent = item.status === 'sent';
-                              const scheduledDate = new Date(item.date);
-                              
-                              let statusBadge = null;
-                              if (isSent) {
-                                statusBadge = (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold uppercase tracking-wider rounded">
-                                    <CheckCircle2 size={8} />
-                                    Enviado
-                                  </span>
-                                );
-                              } else if (isRinging) {
-                                statusBadge = (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-bold uppercase tracking-wider rounded animate-pulse shadow-xs">
-                                    <Bell size={8} className="animate-spin" />
-                                    TOCANDO!
-                                  </span>
-                                );
-                              } else {
-                                statusBadge = (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider rounded">
-                                    <Clock size={8} />
-                                    Agendado
-                                  </span>
-                                );
-                              }
-
-                              let formattedDateStr = "";
-                              try {
-                                formattedDateStr = format(scheduledDate, "dd/MM/yyyy • HH:mm:ss");
-                              } catch (e) {
-                                formattedDateStr = item.date;
-                              }
-
-                              const assignedAcc = item.whatsappAccountId ? whatsappAccounts.find(a => a.id === item.whatsappAccountId) : null;
-                              const cleanPhone = item.phone.replace(/\D/g, '');
-                              const matchClient = enrichedClients.find(c => c.telefone.replace(/\D/g, '') === cleanPhone);
-                              const clientKey = matchClient ? matchClient.key : `manual_${item.id}`;
-                              const currentTag = matchClient ? getClientTag(matchClient) : undefined;
-                              const lastLead = matchClient ? matchClient.leads[0] : null;
-
-                              return (
-                                <tr key={item.id} className={cn("transition-colors", isRinging ? "bg-rose-50/50 hover:bg-rose-50 animate-pulse" : "hover:bg-slate-50")}>
-                                  
-                                  {/* Ações Column (standard 6-icon buttons matching table tags) */}
-                                  <td className="px-2.5 py-1 border-b border-r border-[#dadce0]" onClick={(e) => e.stopPropagation()}>
-                                    <div className="flex items-center justify-center gap-1">
-                                      {item.phone && (
-                                        <button 
-                                          onClick={() => {
-                                            const prod = lastLead?.produto || 'Sem produto';
-                                            const status = matchClient?.status || 'Sem status';
-                                            copyToClipboard(`${item.name} - ${item.phone} - ${prod} - ${status}`);
-                                          }}
-                                          className="w-5 h-5 rounded flex items-center justify-center transition-shadow border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50 shadow-xs"
-                                          title="Copiar Nome + Tel + Produto + Status"
-                                        >
-                                          <Copy size={11} />
-                                        </button>
-                                      )}
-                                      <button 
-                                        onClick={() => toggleTag(clientKey, 'reloginho')}
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                          currentTag === 'reloginho' 
-                                            ? "bg-amber-100 border-amber-200 text-amber-600 font-bold" 
-                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                        )}
-                                        title="Pendente (Follow-up)"
-                                      >
-                                        <Clock size={11} />
-                                      </button>
-                                      <button 
-                                        onClick={() => toggleTag(clientKey, 'contato_sucesso')}
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                          currentTag === 'contato_sucesso' 
-                                            ? "bg-emerald-100 border-emerald-200 text-emerald-600 font-bold" 
-                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                        )}
-                                        title="Contato Bem Sucedido"
-                                      >
-                                        <UserCheck size={11} />
-                                      </button>
-                                      <button 
-                                        onClick={() => toggleTag(clientKey, 'contato_falha')}
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                          currentTag === 'contato_falha' 
-                                            ? "bg-gray-100 border-gray-300 text-gray-800 font-bold" 
-                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                        )}
-                                        title="Contato Mal Sucedido"
-                                      >
-                                        <UserX size={11} />
-                                      </button>
-                                      <button 
-                                        onClick={() => toggleTag(clientKey, 'vendido')}
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                          currentTag === 'vendido' 
-                                            ? "bg-emerald-500 border-emerald-600 text-white font-bold" 
-                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                        )}
-                                        title="Vendido"
-                                      >
-                                        <CheckCircle2 size={11} />
-                                      </button>
-                                      <button 
-                                        onClick={() => toggleTag(clientKey, 'lixo')}
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
-                                          currentTag === 'lixo' 
-                                            ? "bg-rose-100 border-rose-200 text-rose-600 font-bold" 
-                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
-                                        )}
-                                        title="Lixo (Número Inválido)"
-                                      >
-                                        <Trash2 size={11} />
-                                      </button>
-                                    </div>
-                                  </td>
-
-                                  {/* Zap column badge */}
-                                  <td className="px-2.5 py-1 border-b border-r border-[#dadce0] text-center" onClick={(e) => e.stopPropagation()}>
-                                    <div className="flex items-center justify-center">
-                                      <div 
-                                        className={cn(
-                                          "w-5 h-5 rounded flex items-center justify-center transition-colors text-[9px] font-black border shadow-xs text-white",
-                                          assignedAcc ? "" : "bg-white border-[#dadce0] text-[#5f6368]"
-                                        )}
-                                        style={assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
-                                      >
-                                        {assignedAcc ? assignedAcc.identifier : <Phone size={10} />}
-                                      </div>
-                                    </div>
-                                  </td>
-
-                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
-                                    <div className="flex items-center gap-2">
-                                      <div className={cn(
-                                        "w-5 h-5 flex items-center justify-center font-bold text-[9px] rounded-md shrink-0",
-                                        isRinging ? "bg-rose-100 text-rose-600" : "bg-modern-primary/10 text-modern-primary"
-                                      )}>
-                                        {item.name.charAt(0).toUpperCase()}
-                                      </div>
-                                      <div>
-                                        <p className="text-xs font-bold text-modern-text leading-tight">{item.name}</p>
-                                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                                          <p className="text-[9px] font-mono text-modern-secondary leading-none">{item.phone}</p>
-                                          {assignedAcc && (
-                                            <span className="text-[8px] uppercase font-bold text-modern-secondary tracking-widest leading-none bg-slate-100 border border-modern-border/60 px-1 rounded">
-                                              {assignedAcc.name}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
-                                    <p className="text-xs font-semibold text-modern-text">{formattedDateStr}</p>
-                                  </td>
-                                  <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0] text-center">
-                                    {statusBadge}
-                                  </td>
-                                  <td className="px-2.5 py-1.5 border-b border-[#dadce0]">
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      <button 
-                                        onClick={() => {
-                                          const msg = `Olá ${item.name}, estou passando para realizar o seu follow-up agendado!`;
-                                          const cleanPhone = item.phone.replace(/\D/g, '');
-                                          const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
-                                          window.open(url, '_blank');
-                                        }}
-                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs"
-                                        title="Chamar Cliente no WhatsApp"
-                                      >
-                                        Chamar Zap
-                                      </button>
-                                      
-                                      {item.status === 'pending' ? (
-                                        <button 
-                                          onClick={() => updateManualFollowupStatus(item.id, 'sent')}
-                                          className="px-2 py-1 bg-modern-primary hover:bg-modern-primary/95 text-white text-[10px] font-bold uppercase transition-all rounded-md shadow-xs flex items-center gap-1"
-                                          title="Marcar como Enviado"
-                                        >
-                                          Marcar Enviado
-                                        </button>
-                                      ) : (
-                                        <button 
-                                          onClick={() => updateManualFollowupStatus(item.id, 'pending')}
-                                          className="px-2 py-1 bg-slate-100 border border-slate-300 text-slate-600 text-[10px] font-bold uppercase hover:bg-slate-200 transition-all rounded-md flex items-center gap-1"
-                                          title="Voltar para Agendado"
-                                        >
-                                          Reabrir
-                                        </button>
-                                      )}
-
-                                      <button 
-                                        onClick={() => {
-                                          if (confirm("Deseja realmente remover este agendamento?")) {
-                                            deleteManualFollowup(item.id);
-                                          }
-                                        }}
-                                        className="p-1 px-2 text-rose-500 hover:text-rose-700 rounded-md border border-transparent hover:border-slate-200 transition-all"
-                                        title="Excluir agendamento"
-                                      >
-                                        <Trash2 size={12} />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            {manualFollowups.length === 0 && (
-                              <tr>
-                                <td colSpan={4} className="px-4 py-12 text-center">
-                                  <Clock size={32} className="mx-auto text-modern-border mb-3 opacity-20" />
-                                  <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Nenhum follow-up manual cadastrado.</p>
-                                  <p className="text-[10px] text-modern-secondary/60 mt-0.5">Insira um cliente acima para agendar o despertador.</p>
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
+                            </td>
+                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                               <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                            </td>
+                            <td className="px-4 py-4 border-b border-[#dadce0]">
+                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                                 <button 
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     const msg = `Olá ${client.nome}, estou passando para...`;
+                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                     window.open(url, '_blank');
+                                   }}
+                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                                 >
+                                   Chamar no Zap
+                                 </button>
+                                 <button 
+                                   onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleTag(client.key, 'contato_sucesso');
+                                   }}
+                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                                 >
+                                   Resolvido
+                                 </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {followupClients.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-20 text-center">
+                            <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
+                            <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ) : view === 'crm' ? (
             <>
@@ -3725,35 +2816,22 @@ export default function App() {
                             )}>
                               {client.status}
                             </div>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!client.telefone) return;
-                                let msg = `Olá ${client.nome}, tudo bem? Vi o seu interesse em nosso produto e passamos para saber se podemos lhe ajudar com algo a mais.`;
-                                if (currentTag === 'reloginho' || currentTag === 'pendente') {
-                                  msg = `Olá ${client.nome}, tudo bem? Estou passando para dar continuidade ao nosso contato!`;
-                                }
-                                const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                window.open(url, '_blank');
-                              }}
-                              className={cn(
-                                "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer",
-                                !currentTag ? "bg-[#DBEAFE] text-blue-700 hover:bg-[#bfdbfe]" :
-                                (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700 hover:bg-[#fef08a]" : 
-                                (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700 hover:bg-[#a7f3d0]" :
-                                currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700 hover:bg-gray-200" :
-                                currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700 hover:bg-[#fecdd3]" :
-                                "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                              )}
-                              title="Chamar no WhatsApp"
-                            >
+                            <div className={cn(
+                              "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center",
+                              !currentTag ? "bg-[#DBEAFE] text-blue-700" :
+                              (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
+                              (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700" :
+                              currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700" :
+                              currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700" :
+                              "bg-slate-100 text-slate-600"
+                            )}>
                               {!currentTag ? 'Enviar Msg' : 
                                (currentTag === 'pendente' || currentTag === 'reloginho') ? 'Pendente' : 
                                (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? 'Sucesso' : 
                                currentTag === 'contato_falha' ? 'C. Falha' :
                                currentTag === 'lixo' ? 'Lixo' :
                                'Status'}
-                            </button>
+                            </div>
                             {lastLead?.tags && (
                               <div className="px-1.5 py-0.5 rounded-[4px] bg-slate-800 text-white text-[8px] font-black uppercase tracking-tighter shadow-sm">
                                 {lastLead.tags}
