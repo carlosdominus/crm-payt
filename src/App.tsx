@@ -595,6 +595,7 @@ export default function App() {
     whatsappAccountId: ""
   });
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
+  const [isManualZapDropdownOpen, setIsManualZapDropdownOpen] = useState(false);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
@@ -1870,7 +1871,8 @@ export default function App() {
             } else {
               // Deterministic key: phone OR email OR name
               // BUT we prefix it to avoid collisions between different types
-              const clientKey = lead.telefone ? `tel_${lead.telefone}` : (lead.email ? `email_${lead.email.toLowerCase()}` : `name_${lead.nome.toLowerCase()}`);
+              const cleanT = lead.telefone ? cleanPhone(lead.telefone) : "";
+              const clientKey = cleanT ? `tel_${cleanT}` : (lead.email ? `email_${lead.email.toLowerCase().trim()}` : `name_${lead.nome.toLowerCase().trim()}`);
               
               const newClient: Client = {
                 email: lead.email,
@@ -1952,7 +1954,8 @@ export default function App() {
             
             name = cleanCustomerName(name, email);
             
-            let stableKey = phone ? `tel_${phone}` : (email ? `email_${email.toLowerCase()}` : `name_${name.toLowerCase()}`);
+            const cleanP = phone ? cleanPhone(phone) : "";
+            let stableKey = cleanP ? `tel_${cleanP}` : (email ? `email_${email.toLowerCase().trim()}` : `name_${name.toLowerCase().trim()}`);
             
             if (seenKeys.has(stableKey)) {
               let suffix = 1;
@@ -2496,19 +2499,25 @@ export default function App() {
                       <table className="w-full text-left border-separate border-spacing-0">
                         <thead>
                           <tr className="bg-[#f8f9fa]">
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-36">Ações</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-12">Zap</th>
                             <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Lead</th>
                             <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Motivo Follow-up</th>
                             <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações</th>
+                            <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações Zap</th>
                           </tr>
                         </thead>
                         <tbody>
                           {followupClients.map(client => {
-                            const tag = clientTags[client.key];
-                            const tagDateStr = tagTimestamps[client.key];
-                            const pStatus = paymentStatuses[client.key];
-                            const potCount = potsCounts[client.key];
+                            const clientKey = client.key;
+                            const tag = clientTags[clientKey];
+                            const currentTag = getClientTag(client);
+                            const tagDateStr = tagTimestamps[clientKey];
+                            const pStatus = paymentStatuses[clientKey];
+                            const potCount = potsCounts[clientKey];
                             const now = new Date();
+                            const lastLead = client.leads[0];
+                            const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
 
                             let reason = "";
                             let displayTime = "";
@@ -2532,6 +2541,100 @@ export default function App() {
 
                             return (
                               <tr key={client.key} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                                {/* Ações Column (standard 6-icon buttons exactly like main table) */}
+                                <td className="px-2.5 py-1 border-b border-r border-[#dadce0]" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-center gap-1">
+                                    {client.telefone && (
+                                      <button 
+                                        onClick={() => {
+                                          const prod = lastLead?.produto || 'Sem produto';
+                                          const status = client.status || 'Sem status';
+                                          copyToClipboard(`${client.nome} - ${client.telefone} - ${prod} - ${status}`);
+                                        }}
+                                        className="w-5 h-5 rounded flex items-center justify-center transition-shadow border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50 shadow-xs"
+                                        title="Copiar Nome + Tel + Produto + Status"
+                                      >
+                                        <Copy size={11} />
+                                      </button>
+                                    )}
+                                    <button 
+                                      onClick={() => toggleTag(clientKey, 'reloginho')}
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                        currentTag === 'reloginho' 
+                                          ? "bg-amber-100 border-amber-200 text-amber-600 font-bold" 
+                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      )}
+                                      title="Pendente (Follow-up)"
+                                    >
+                                      <Clock size={11} />
+                                    </button>
+                                    <button 
+                                      onClick={() => toggleTag(clientKey, 'contato_sucesso')}
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                        currentTag === 'contato_sucesso' 
+                                          ? "bg-emerald-100 border-emerald-200 text-emerald-600 font-bold" 
+                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      )}
+                                      title="Contato Bem Sucedido"
+                                    >
+                                      <UserCheck size={11} />
+                                    </button>
+                                    <button 
+                                      onClick={() => toggleTag(clientKey, 'contato_falha')}
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                        currentTag === 'contato_falha' 
+                                          ? "bg-gray-100 border-gray-300 text-gray-800 font-bold" 
+                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      )}
+                                      title="Contato Mal Sucedido"
+                                    >
+                                      <UserX size={11} />
+                                    </button>
+                                    <button 
+                                      onClick={() => toggleTag(clientKey, 'vendido')}
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                        currentTag === 'vendido' 
+                                          ? "bg-emerald-500 border-emerald-600 text-white font-bold" 
+                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      )}
+                                      title="Vendido"
+                                    >
+                                      <CheckCircle2 size={11} />
+                                    </button>
+                                    <button 
+                                      onClick={() => toggleTag(clientKey, 'lixo')}
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                        currentTag === 'lixo' 
+                                          ? "bg-rose-100 border-rose-200 text-rose-600 font-bold" 
+                                          : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      )}
+                                      title="Lixo (Número Inválido)"
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
+                                </td>
+
+                                {/* Zap column identifier color badge */}
+                                <td className="px-2.5 py-1 border-b border-r border-[#dadce0] text-center" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-center">
+                                    <div 
+                                      className={cn(
+                                        "w-5 h-5 rounded flex items-center justify-center transition-colors text-[9px] font-black border shadow-xs text-white",
+                                        assignedAcc ? "" : "bg-white border-[#dadce0] text-[#5f6368]"
+                                      )}
+                                      style={assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
+                                    >
+                                      {assignedAcc ? assignedAcc.identifier : <Phone size={10} />}
+                                    </div>
+                                  </div>
+                                </td>
+
                                 <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
                                   <div className="flex items-center gap-2">
                                     <div className="w-5 h-5 shrink-0 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-bold text-[9px] rounded-md">
@@ -2557,7 +2660,7 @@ export default function App() {
                                      <button 
                                        onClick={(e) => {
                                          e.stopPropagation();
-                                         const msg = `Olá ${client.nome}, estou passando para...`;
+                                         const msg = `Olá ${client.nome}, tudo bem? Vi o seu interesse em nosso produto e passamos para saber se podemos lhe ajudar com algo a mais.`;
                                          const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
                                          window.open(url, '_blank');
                                        }}
@@ -2581,7 +2684,7 @@ export default function App() {
                           })}
                           {followupClients.length === 0 && (
                             <tr>
-                              <td colSpan={4} className="px-4 py-12 text-center">
+                              <td colSpan={6} className="px-4 py-12 text-center">
                                 <Clock size={32} className="mx-auto text-modern-border mb-3 opacity-20" />
                                 <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
                               </td>
@@ -2657,20 +2760,89 @@ export default function App() {
                           className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text focus:text-slate-900"
                         />
                       </div>
-                      <div className="space-y-1">
+                      {/* Custom dropdown selection block with colors, numbers & origin */}
+                      <div className="space-y-1 relative">
                         <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">WhatsApp Utilizado</label>
-                        <select 
-                          value={manualFollowupForm.whatsappAccountId}
-                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: e.target.value }))}
-                          className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text"
-                        >
-                          <option value="">Nenhum / Padrão</option>
-                          {whatsappAccounts.map(acc => (
-                            <option key={acc.id} value={acc.id}>
-                              {acc.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setIsManualZapDropdownOpen(!isManualZapDropdownOpen)}
+                            className="w-full flex items-center justify-between px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text"
+                          >
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                const selectedAcc = whatsappAccounts.find(a => a.id === manualFollowupForm.whatsappAccountId);
+                                if (selectedAcc) {
+                                  return (
+                                    <>
+                                      <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-black text-white shrink-0 shadow-xs" style={{ backgroundColor: selectedAcc.color }}>
+                                        {selectedAcc.identifier}
+                                      </div>
+                                      <span className="truncate">{selectedAcc.name}</span>
+                                    </>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100 text-[#5f6368] shrink-0 border border-[#dadce0]">
+                                      <Phone size={10} />
+                                    </div>
+                                    <span className="truncate">Nenhum / Padrão</span>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                            <ChevronDown size={14} className="text-[#5f6368]" />
+                          </button>
+                          
+                          {isManualZapDropdownOpen && (
+                            <>
+                              {/* Overlay for clicking away */}
+                              <div className="fixed inset-0 z-[290]" onClick={() => setIsManualZapDropdownOpen(false)} />
+                              <div className="absolute left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.2)] rounded-lg z-[300] custom-scrollbar py-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: "" }));
+                                    setIsManualZapDropdownOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 flex items-center gap-2 transition-colors",
+                                    !manualFollowupForm.whatsappAccountId && "bg-slate-50 font-bold"
+                                  )}
+                                >
+                                  <div className="w-5 h-5 rounded flex items-center justify-center bg-slate-100 text-[#5f6368] shrink-0 border border-[#dadce0]">
+                                    <Phone size={10} />
+                                  </div>
+                                  <span>Nenhum / Padrão</span>
+                                </button>
+                                
+                                {whatsappAccounts.map(acc => (
+                                  <button
+                                    key={acc.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setManualFollowupForm(prev => ({ ...prev, whatsappAccountId: acc.id }));
+                                      setIsManualZapDropdownOpen(false);
+                                    }}
+                                    className={cn(
+                                      "w-full text-left px-3 py-1.5 text-xs font-medium hover:bg-slate-50 flex items-center gap-3 transition-colors",
+                                      manualFollowupForm.whatsappAccountId === acc.id && "bg-emerald-50/50 font-bold"
+                                    )}
+                                  >
+                                    <div className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-black text-white shrink-0 shadow-xs" style={{ backgroundColor: acc.color }}>
+                                      {acc.identifier}
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="truncate leading-none mb-0.5 text-modern-text">{acc.name}</span>
+                                      <span className="text-[7px] uppercase text-modern-secondary tracking-widest leading-none opacity-60">{acc.origin}</span>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <button 
                         type="submit"
@@ -2726,10 +2898,12 @@ export default function App() {
                         <table className="w-full text-left border-separate border-spacing-0">
                           <thead>
                             <tr className="bg-[#f8f9fa]">
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-36">Ações</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-12">Zap</th>
                               <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Cliente</th>
                               <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Data Agendada</th>
                               <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center">Status / Alarme</th>
-                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações</th>
+                              <th className="px-2.5 py-1.5 text-[10px] font-bold text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center">Ações Zap</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2770,9 +2944,109 @@ export default function App() {
                               }
 
                               const assignedAcc = item.whatsappAccountId ? whatsappAccounts.find(a => a.id === item.whatsappAccountId) : null;
+                              const cleanPhone = item.phone.replace(/\D/g, '');
+                              const matchClient = enrichedClients.find(c => c.telefone.replace(/\D/g, '') === cleanPhone);
+                              const clientKey = matchClient ? matchClient.key : `manual_${item.id}`;
+                              const currentTag = matchClient ? getClientTag(matchClient) : undefined;
+                              const lastLead = matchClient ? matchClient.leads[0] : null;
 
                               return (
                                 <tr key={item.id} className={cn("transition-colors", isRinging ? "bg-rose-50/50 hover:bg-rose-50 animate-pulse" : "hover:bg-slate-50")}>
+                                  
+                                  {/* Ações Column (standard 6-icon buttons matching table tags) */}
+                                  <td className="px-2.5 py-1 border-b border-r border-[#dadce0]" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center justify-center gap-1">
+                                      {item.phone && (
+                                        <button 
+                                          onClick={() => {
+                                            const prod = lastLead?.produto || 'Sem produto';
+                                            const status = matchClient?.status || 'Sem status';
+                                            copyToClipboard(`${item.name} - ${item.phone} - ${prod} - ${status}`);
+                                          }}
+                                          className="w-5 h-5 rounded flex items-center justify-center transition-shadow border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50 shadow-xs"
+                                          title="Copiar Nome + Tel + Produto + Status"
+                                        >
+                                          <Copy size={11} />
+                                        </button>
+                                      )}
+                                      <button 
+                                        onClick={() => toggleTag(clientKey, 'reloginho')}
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                          currentTag === 'reloginho' 
+                                            ? "bg-amber-100 border-amber-200 text-amber-600 font-bold" 
+                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                        )}
+                                        title="Pendente (Follow-up)"
+                                      >
+                                        <Clock size={11} />
+                                      </button>
+                                      <button 
+                                        onClick={() => toggleTag(clientKey, 'contato_sucesso')}
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                          currentTag === 'contato_sucesso' 
+                                            ? "bg-emerald-100 border-emerald-200 text-emerald-600 font-bold" 
+                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                        )}
+                                        title="Contato Bem Sucedido"
+                                      >
+                                        <UserCheck size={11} />
+                                      </button>
+                                      <button 
+                                        onClick={() => toggleTag(clientKey, 'contato_falha')}
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                          currentTag === 'contato_falha' 
+                                            ? "bg-gray-100 border-gray-300 text-gray-800 font-bold" 
+                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                        )}
+                                        title="Contato Mal Sucedido"
+                                      >
+                                        <UserX size={11} />
+                                      </button>
+                                      <button 
+                                        onClick={() => toggleTag(clientKey, 'vendido')}
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                          currentTag === 'vendido' 
+                                            ? "bg-emerald-500 border-emerald-600 text-white font-bold" 
+                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                        )}
+                                        title="Vendido"
+                                      >
+                                        <CheckCircle2 size={11} />
+                                      </button>
+                                      <button 
+                                        onClick={() => toggleTag(clientKey, 'lixo')}
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-all border",
+                                          currentTag === 'lixo' 
+                                            ? "bg-rose-100 border-rose-200 text-rose-600 font-bold" 
+                                            : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                        )}
+                                        title="Lixo (Número Inválido)"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  </td>
+
+                                  {/* Zap column badge */}
+                                  <td className="px-2.5 py-1 border-b border-r border-[#dadce0] text-center" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center justify-center">
+                                      <div 
+                                        className={cn(
+                                          "w-5 h-5 rounded flex items-center justify-center transition-colors text-[9px] font-black border shadow-xs text-white",
+                                          assignedAcc ? "" : "bg-white border-[#dadce0] text-[#5f6368]"
+                                        )}
+                                        style={assignedAcc ? { backgroundColor: assignedAcc.color } : {}}
+                                      >
+                                        {assignedAcc ? assignedAcc.identifier : <Phone size={10} />}
+                                      </div>
+                                    </div>
+                                  </td>
+
                                   <td className="px-2.5 py-1.5 border-b border-r border-[#dadce0]">
                                     <div className="flex items-center gap-2">
                                       <div className={cn(
@@ -2786,10 +3060,7 @@ export default function App() {
                                         <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                           <p className="text-[9px] font-mono text-modern-secondary leading-none">{item.phone}</p>
                                           {assignedAcc && (
-                                            <span 
-                                              className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded text-white shadow-xs"
-                                              style={{ backgroundColor: assignedAcc.color || '#3b82f6' }}
-                                            >
+                                            <span className="text-[8px] uppercase font-bold text-modern-secondary tracking-widest leading-none bg-slate-100 border border-modern-border/60 px-1 rounded">
                                               {assignedAcc.name}
                                             </span>
                                           )}
