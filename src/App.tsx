@@ -607,6 +607,8 @@ export default function App() {
     identifier: ""
   });
 
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+
   const getClientTag = (client: Client) => {
     // 1. Manual tag from Firestore (highest priority)
     const manualTag = clientTags[client.key];
@@ -2031,6 +2033,30 @@ export default function App() {
     });
   }, [clients, manualSales, clientExtraData]);
 
+  const clientSuggestions = useMemo(() => {
+    const nameQuery = manualFollowupForm.name.trim().toLowerCase();
+    const phoneQuery = manualFollowupForm.phone.replace(/\D/g, '');
+    
+    if (!nameQuery && !phoneQuery) return [];
+    
+    return enrichedClients.filter(client => {
+      const nameMatch = nameQuery ? client.nome.toLowerCase().includes(nameQuery) : false;
+      const cleanClientPhone = client.telefone ? client.telefone.replace(/\D/g, '') : '';
+      const phoneMatch = phoneQuery ? cleanClientPhone.includes(phoneQuery) : false;
+      return nameMatch || phoneMatch;
+    }).slice(0, 8);
+  }, [manualFollowupForm.name, manualFollowupForm.phone, enrichedClients]);
+
+  const handleSelectSuggestedClient = (client: Client) => {
+    setManualFollowupForm(prev => ({
+      ...prev,
+      name: client.nome,
+      phone: formatBrazilianPhone(client.telefone),
+      whatsappAccountId: client.assignedWhatsappId || ""
+    }));
+    setShowClientSuggestions(false);
+  };
+
   const filteredClients = useMemo(() => {
     const now = new Date();
     let start: Date | null = null;
@@ -2723,16 +2749,65 @@ export default function App() {
                       }}
                       className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"
                     >
-                      <div className="space-y-1">
+                      <div className="space-y-1 relative">
                         <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Nome do Cliente</label>
                         <input 
                           type="text" 
                           required
                           placeholder="EX: Carlos Henrique"
                           value={manualFollowupForm.name}
-                          onChange={(e) => setManualFollowupForm(prev => ({ ...prev, name: e.target.value }))}
+                          onChange={(e) => {
+                            setManualFollowupForm(prev => ({ ...prev, name: e.target.value }));
+                            setShowClientSuggestions(true);
+                          }}
+                          onFocus={() => setShowClientSuggestions(true)}
                           className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
                         />
+                        
+                        {showClientSuggestions && clientSuggestions.length > 0 && (
+                          <>
+                            {/* Simple transparent background clickaway overlay */}
+                            <div className="fixed inset-0 z-[290]" onClick={() => setShowClientSuggestions(false)} />
+                            <div className="absolute left-0 right-0 md:w-[210%] mt-1 max-h-60 overflow-y-auto bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.2)] rounded-lg z-[300] custom-scrollbar py-1">
+                              <div className="px-2.5 py-1 text-[8px] font-bold uppercase text-slate-400 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                                <span>Selecionar Cliente Existente</span>
+                                <span>{clientSuggestions.length} encontrados</span>
+                              </div>
+                              {clientSuggestions.map(client => {
+                                const matchedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
+                                return (
+                                  <button
+                                    key={client.key}
+                                    type="button"
+                                    onClick={() => handleSelectSuggestedClient(client)}
+                                    className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex flex-col gap-0.5 border-b border-slate-50 last:border-b-0 cursor-pointer"
+                                  >
+                                    <div className="flex items-center justify-between w-full">
+                                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[130px]">{client.nome}</span>
+                                      {matchedAcc && (
+                                        <span 
+                                          className="text-[8px] font-black uppercase text-white px-1.5 py-0.2 rounded shrink-0 shadow-xs scale-90"
+                                          style={{ backgroundColor: matchedAcc.color }}
+                                        >
+                                          {matchedAcc.name}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                      <span>{formatBrazilianPhone(client.telefone)}</span>
+                                      {client.email && (
+                                        <>
+                                          <span className="opacity-40">•</span>
+                                          <span className="truncate max-w-[150px]">{client.email}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
                       </div>
                       <div className="space-y-1">
                         <label className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Telefone / WhatsApp</label>
@@ -2744,7 +2819,9 @@ export default function App() {
                           onChange={(e) => {
                             const formatted = formatBrazilianPhone(e.target.value);
                             setManualFollowupForm(prev => ({ ...prev, phone: formatted }));
+                            setShowClientSuggestions(true);
                           }}
+                          onFocus={() => setShowClientSuggestions(true)}
                           className="w-full px-3 py-1.5 bg-white border border-modern-border rounded-md text-xs font-medium focus:outline-none focus:ring-1 focus:ring-modern-primary text-modern-text placeholder:text-slate-300"
                         />
                       </div>
