@@ -505,7 +505,11 @@ export default function App() {
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
-  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
+  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string; manualFollowupDate?: string; manualFollowupDone?: boolean }>>({});
+  const [followupTab, setFollowupTab] = useState<'automatico' | 'manual'>('automatico');
+  const [manualSearchTerm, setManualSearchTerm] = useState("");
+  const [selectedManualClient, setSelectedManualClient] = useState<Client | null>(null);
+  const [scheduledFollowupDate, setScheduledFollowupDate] = useState("");
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [whatsappForm, setWhatsappForm] = useState({
@@ -1072,7 +1076,7 @@ export default function App() {
     }
   };
 
-  const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string }) => {
+  const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string; manualFollowupDate?: string; manualFollowupDone?: boolean }) => {
     if (!user) return;
     try {
       const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
@@ -1789,10 +1793,100 @@ export default function App() {
         status,
         manualSales: clientManualSales,
         trackingCode: clientExtraData[client.key]?.trackingCode,
-        assignedWhatsappId: clientExtraData[client.key]?.assignedWhatsappId
+        assignedWhatsappId: clientExtraData[client.key]?.assignedWhatsappId,
+        manualFollowupDate: clientExtraData[client.key]?.manualFollowupDate,
+        manualFollowupDone: clientExtraData[client.key]?.manualFollowupDone
       };
     });
   }, [clients, manualSales, clientExtraData]);
+
+  const dueFollowups = useMemo(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    return enrichedClients.filter(c => 
+      c.manualFollowupDate && 
+      !c.manualFollowupDone && 
+      c.manualFollowupDate <= todayStr
+    );
+  }, [enrichedClients]);
+
+  const searchResults = useMemo(() => {
+    if (!manualSearchTerm.trim()) return [];
+    const term = manualSearchTerm.toLowerCase();
+    return enrichedClients.filter(c => 
+      c.nome.toLowerCase().includes(term) || 
+      c.telefone.includes(term)
+    ).slice(0, 10);
+  }, [manualSearchTerm, enrichedClients]);
+
+  const scheduledManualFollowups = useMemo(() => {
+    return enrichedClients.filter(c => c.manualFollowupDate);
+  }, [enrichedClients]);
+
+  const [alarmActive, setAlarmActive] = useState(false);
+
+  useEffect(() => {
+    if (dueFollowups.length > 0) {
+      setAlarmActive(true);
+    } else {
+      setAlarmActive(false);
+    }
+  }, [dueFollowups]);
+
+  useEffect(() => {
+    if (!alarmActive) return;
+
+    let audioCtx: AudioContext | null = null;
+    let intervalId: any = null;
+
+    const playBeep = () => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return;
+        if (!audioCtx) {
+          audioCtx = new AudioContextClass();
+        }
+        if (audioCtx.state === 'suspended') {
+          return;
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      } catch (e) {
+        console.warn("Audio Context error:", e);
+      }
+    };
+
+    intervalId = setInterval(() => {
+      playBeep();
+      setTimeout(playBeep, 200);
+    }, 4000);
+
+    playBeep();
+
+    return () => {
+      clearInterval(intervalId);
+      if (audioCtx) {
+        audioCtx.close();
+      }
+    };
+  }, [alarmActive]);
+
+  useEffect(() => {
+    const resumeAudio = () => {
+      // Global click gesture to allow audio context start
+    };
+    window.addEventListener('click', resumeAudio);
+    return () => window.removeEventListener('click', resumeAudio);
+  }, []);
 
   const filteredClients = useMemo(() => {
     const now = new Date();
@@ -2195,121 +2289,441 @@ export default function App() {
         
         <div className="flex-1 overflow-hidden flex flex-col">
           {view === 'followup' ? (
-            <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-              <div className="flex items-center justify-between">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50/50">
+              {/* Header Box */}
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-white border border-modern-border p-6 rounded-2xl shadow-sm">
                 <div>
-                  <h2 className="text-2xl font-bold text-modern-text">Dashboard de Follow-up</h2>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Leads aguardando retorno baseado em regras de tempo</p>
+                  <h2 className="text-xl font-extrabold text-modern-text tracking-tight uppercase">Dashboard de Follow-up</h2>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#64748b] mt-1">Gerencie os retornos programados e automáticos de seus clientes</p>
                 </div>
-                <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4">
-                   <Clock size={20} className="text-modern-primary" />
-                   <div>
-                     <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
-                     <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
-                   </div>
+                
+                {/* Switcher Key select */}
+                <div className="flex items-center gap-6">
+                  <div className="flex bg-[#f1f5f9] p-1 rounded-xl border border-slate-200">
+                    <button
+                      onClick={() => setFollowupTab('automatico')}
+                      className={cn(
+                        "px-5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all rounded-lg flex items-center gap-2",
+                        followupTab === 'automatico' ? "bg-white text-modern-primary shadow-sm" : "text-modern-secondary hover:text-modern-text"
+                      )}
+                    >
+                      <RefreshCw size={12} /> Automático
+                    </button>
+                    <button
+                      onClick={() => setFollowupTab('manual')}
+                      className={cn(
+                        "px-5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all rounded-lg flex items-center gap-2",
+                        followupTab === 'manual' ? "bg-white text-modern-primary shadow-sm" : "text-modern-secondary hover:text-modern-text"
+                      )}
+                    >
+                      <Calendar size={12} /> Manual
+                    </button>
+                  </div>
+                  
+                  <div className="bg-slate-50 border border-modern-border px-4 py-2 rounded-xl flex items-center gap-3">
+                     <Clock size={16} className="text-modern-primary" />
+                     <div>
+                       <p className="text-[8px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-0.5">Aguardando</p>
+                       <p className="text-sm font-black text-modern-text leading-none">
+                         {followupTab === 'automatico' ? followupClients.length : dueFollowups.length}
+                       </p>
+                     </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-white border border-modern-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-separate border-spacing-0">
-                    <thead>
-                      <tr className="bg-[#f8f9fa]">
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {followupClients.map(client => {
-                        const tag = clientTags[client.key];
-                        const tagDateStr = tagTimestamps[client.key];
-                        const pStatus = paymentStatuses[client.key];
-                        const potCount = potsCounts[client.key];
-                        const now = new Date();
+              {followupTab === 'automatico' ? (
+                <div className="bg-white border border-modern-border shadow-sm rounded-2xl overflow-hidden">
+                  <div className="p-4 bg-slate-50 border-b border-modern-border">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-modern-secondary">Retornos sugeridos pelo sistema com base em regras de tempo</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-separate border-spacing-0">
+                      <thead>
+                        <tr className="bg-[#f8f9fa]">
+                          {/* Ações/Tags column on the left of lead column */}
+                          <th className="px-3 py-3 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0] text-center w-[160px]">Ações / Tags</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {followupClients.map(client => {
+                          const clientKey = client.key;
+                          const tag = clientTags[clientKey];
+                          const currentTag = getClientTag(client);
+                          const tagDateStr = tagTimestamps[clientKey];
+                          const pStatus = paymentStatuses[clientKey];
+                          const potCount = potsCounts[clientKey];
+                          const lastLead = client.leads[0];
+                          const now = new Date();
 
-                        let reason = "";
-                        let displayTime = "";
-                        
-                        if (tag === 'reloginho' && tagDateStr) {
-                           reason = "Follow-up Manual (Reloginho)";
-                           displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
-                        } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Pix Enviado";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Link de Pagamento";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Boleto";
-                           displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
-                        } else if (potCount > 0 && client.lastPurchaseDate) {
-                           reason = `Recompra - ${potCount} Pote(s)`;
-                           displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
-                        }
+                          let reason = "";
+                          let displayTime = "";
+                          
+                          if (tag === 'reloginho' && tagDateStr) {
+                             reason = "Follow-up Manual (Reloginho)";
+                             displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
+                          } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Pix Enviado";
+                             displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                          } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Link de Pagamento";
+                             displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                          } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Boleto";
+                             displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
+                          } else if (potCount > 0 && client.lastPurchaseDate) {
+                             reason = `Recompra - ${potCount} Pote(s)`;
+                             displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
+                          }
 
-                        return (
-                          <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
-                                  {client.nome.charAt(0)}
+                          return (
+                            <tr key={client.key} className="hover:bg-[#f1f3f4]/60 transition-colors cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                              {/* The Ações/Tags buttons as on main panel */}
+                              <td className="px-3 py-2 border-b border-r border-[#dadce0]" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-center gap-1">
+                                  {client.telefone && (
+                                    <button 
+                                      onClick={() => {
+                                        const prod = lastLead?.produto || 'Sem produto';
+                                        const status = client.status || 'Sem status';
+                                        copyToClipboard(`${client.nome} - ${client.telefone} - ${prod} - ${status}`);
+                                      }}
+                                      className="w-6 h-6 rounded-md flex items-center justify-center transition-all border bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                      title="Copiar Nome + Tel + Produto + Status"
+                                    >
+                                      <Copy size={12} />
+                                    </button>
+                                  )}
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'reloginho')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'reloginho' 
+                                        ? "bg-amber-100 border-amber-200 text-amber-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Pendente (Follow-up)"
+                                  >
+                                    <Clock size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'contato_sucesso')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'contato_sucesso' 
+                                        ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Contato Bem Sucedido"
+                                  >
+                                    <UserCheck size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'contato_falha')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'contato_falha' 
+                                        ? "bg-gray-100 border-gray-300 text-gray-800" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Contato Mal Sucedido"
+                                  >
+                                    <UserX size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'vendido')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'vendido' 
+                                        ? "bg-emerald-500 border-emerald-600 text-white" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Vendido"
+                                  >
+                                    <CheckCircle2 size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'lixo')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'lixo' 
+                                        ? "bg-rose-100 border-rose-200 text-rose-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Lixo"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
                                 </div>
-                                <div>
-                                  <p className="text-xs font-bold text-modern-text">{client.nome}</p>
-                                  <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                              </td>
+
+                              <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
+                                    {client.nome.charAt(0)}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold text-modern-text">{client.nome}</p>
+                                    <p className="text-[10px] text-modern-secondary font-mono">{client.telefone}</p>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-2">
-                                 <AlertCircle size={14} className="text-orange-500" />
-                                 <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                               <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
-                            </td>
-                            <td className="px-4 py-4 border-b border-[#dadce0]">
-                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
-                                 <button 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     const msg = `Olá ${client.nome}, estou passando para...`;
-                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                     window.open(url, '_blank');
-                                   }}
-                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
-                                 >
-                                   Chamar no Zap
-                                 </button>
-                                 <button 
-                                   onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleTag(client.key, 'contato_sucesso');
-                                   }}
-                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-                                 >
-                                   Resolvido
-                                 </button>
-                              </div>
+                              </td>
+                              <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                <div className="flex items-center gap-2">
+                                   <AlertCircle size={14} className="text-orange-500" />
+                                   <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 border-b border-r border-[#dadce0]">
+                                 <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                              </td>
+                              <td className="px-4 py-4 border-b border-[#dadce0]">
+                                <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
+                                   <button 
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       const msg = `Olá ${client.nome}, estou passando para...`;
+                                       const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                       window.open(url, '_blank');
+                                     }}
+                                     className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all rounded-md"
+                                   >
+                                     Chamar no Zap
+                                   </button>
+                                   <button 
+                                     onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleTag(client.key, 'contato_sucesso');
+                                     }}
+                                     className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all rounded-md"
+                                   >
+                                     Resolvido
+                                   </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {followupClients.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-20 text-center">
+                              <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
+                              <p className="text-xs font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up automático pendente.</p>
                             </td>
                           </tr>
-                        );
-                      })}
-                      {followupClients.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="px-4 py-20 text-center">
-                            <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
-                            <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Column: Search and Select Client */}
+                  <div className="lg:col-span-2 bg-white border border-modern-border p-6 rounded-2xl shadow-sm space-y-6">
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-widest text-[#64748b] mb-4">Pesquisar Cliente</h3>
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-modern-secondary" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="Digite o nome ou telefone do cliente para escolher..."
+                          value={manualSearchTerm}
+                          onChange={(e) => setManualSearchTerm(e.target.value)}
+                          className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-modern-border rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
+                      </div>
+                      
+                      {/* Search Results */}
+                      {searchResults.length > 0 && (
+                        <div className="mt-4 border border-modern-border rounded-xl overflow-hidden divide-y divide-slate-100 bg-white shadow-lg">
+                          {searchResults.map(c => (
+                            <button
+                              key={c.key}
+                              onClick={() => {
+                                setManualSearchTerm("");
+                                setSelectedManualClient(c);
+                              }}
+                              className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center justify-between transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600">
+                                  {c.nome.charAt(0)}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-extrabold text-[#1e293b]">{c.nome}</p>
+                                  <p className="text-[10px] text-slate-500 font-mono">{c.telefone}</p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-black uppercase tracking-wider text-modern-primary bg-modern-primary/5 px-2 py-1 rounded-md">Escolher</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {manualSearchTerm.trim() !== "" && searchResults.length === 0 && (
+                        <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase">Nenhum cliente encontrado pelo termo "{manualSearchTerm}"</p>
+                      )}
+                    </div>
+
+                    {/* Selected Client Card Details */}
+                    {selectedManualClient ? (
+                      <div className="bg-slate-50 border border-modern-border p-6 rounded-xl space-y-4">
+                        <div className="flex items-start justify-between border-b border-slate-200 pb-4">
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Cliente Selecionado</p>
+                            <h4 className="text-lg font-black text-slate-800 leading-tight">{selectedManualClient.nome}</h4>
+                            <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedManualClient.telefone}</p>
+                          </div>
+                          <button 
+                            onClick={() => setSelectedManualClient(null)}
+                            className="text-slate-400 hover:text-slate-600 font-black text-xs uppercase"
+                          >
+                            Desmarcar
+                          </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="bg-white border border-slate-200 p-4 rounded-xl">
+                            <p className="text-[9px] font-black uppercase text-[#64748b] mb-1.5 flex items-center gap-1.5"><Phone size={10} className="text-emerald-500" /> WhatsApp Cadastrado</p>
+                            {(() => {
+                              const assigned = whatsappAccounts.find(a => a.id === selectedManualClient.assignedWhatsappId);
+                              if (assigned) {
+                                return (
+                                  <div>
+                                    <p className="text-xs font-bold text-slate-800 uppercase flex items-center gap-2">
+                                      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: assigned.color }} />
+                                      {assigned.name}
+                                    </p>
+                                    <p className="text-[10px] font-mono text-slate-500 mt-1">ID Atendente: {assigned.identifier}</p>
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div>
+                                    <p className="text-xs font-bold text-rose-500 uppercase">Nenhum Zap Cadastrado</p>
+                                    <p className="text-[9px] text-[#64748b] uppercase mt-1">Pode atribuí-lo diretamente na listagem da tabela CRM</p>
+                                  </div>
+                                );
+                              }
+                            })()}
+                          </div>
+                          
+                          <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-between">
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-[#64748b] mb-1.5">Programar Data de Contato</p>
+                              <input 
+                                type="date"
+                                value={scheduledFollowupDate}
+                                onChange={(e) => setScheduledFollowupDate(e.target.value)}
+                                className="w-full bg-slate-50 border border-modern-border p-2 rounded-lg text-xs font-bold focus:outline-none focus:ring-2 focus:ring-modern-primary/20"
+                              />
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (!scheduledFollowupDate) return;
+                                await updateClientExtra(selectedManualClient.key, { 
+                                  manualFollowupDate: scheduledFollowupDate, 
+                                  manualFollowupDone: false 
+                                });
+                                setScheduledFollowupDate("");
+                                setSelectedManualClient(null);
+                              }}
+                              disabled={!scheduledFollowupDate}
+                              className="mt-4 w-full bg-modern-primary text-white py-2 font-black text-[10px] uppercase tracking-widest hover:bg-modern-primary/95 transition-all rounded-lg disabled:opacity-40"
+                            >
+                              Programar Follow-up
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-14 text-center border border-dashed border-modern-border rounded-xl bg-slate-50/50">
+                        <Users size={32} className="mx-auto text-slate-300 mb-2" />
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Escolha um cliente acima para planejar o follow-up manual</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Existing / Programmed Manual Follow-ups */}
+                  <div className="bg-white border border-modern-border p-6 rounded-2xl shadow-sm flex flex-col">
+                    <div className="border-b border-modern-border pb-4 mb-4">
+                      <h3 className="text-xs font-black uppercase tracking-widest text-[#1e293b]">Followups Agendados</h3>
+                      <p className="text-[9px] text-slate-500 uppercase mt-1">Todos os agendamentos de retornos manuais</p>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto max-h-[450px] space-y-3 custom-scrollbar">
+                      {scheduledManualFollowups.length > 0 ? (
+                        scheduledManualFollowups.map(c => {
+                          const isDue = c.manualFollowupDate && !c.manualFollowupDone && c.manualFollowupDate <= format(new Date(), 'yyyy-MM-dd');
+                          return (
+                            <div key={c.key} className={cn(
+                              "p-4 border rounded-xl flex flex-col gap-3 transition-colors",
+                              isDue ? "bg-rose-50 border-rose-300" : "bg-slate-50 border-slate-200"
+                            )}>
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p className="text-xs font-extrabold text-slate-800">{c.nome}</p>
+                                  <p className="text-[10px] text-slate-400 font-mono">{c.telefone}</p>
+                                </div>
+                                <span className={cn(
+                                  "text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md",
+                                  c.manualFollowupDone 
+                                    ? "bg-slate-200 text-slate-600" 
+                                    : isDue 
+                                      ? "bg-rose-100 text-rose-700 animate-pulse" 
+                                      : "bg-blue-100 text-blue-700"
+                                )}>
+                                  {c.manualFollowupDone ? "Enviado" : isDue ? "ALARME" : "Agendado"}
+                                </span>
+                              </div>
+                              
+                              <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200/50 text-[10px]">
+                                <span className="text-[#64748b] font-bold">Data programada:</span>
+                                <span className="font-extrabold text-slate-700">
+                                  {(() => {
+                                    if (!c.manualFollowupDate) return "";
+                                    const [y, m, d] = c.manualFollowupDate.split('-');
+                                    return `${d}/${m}/${y}`;
+                                  })()}
+                                </span>
+                              </div>
+                              
+                              <div className="flex gap-2">
+                                {!c.manualFollowupDone && (
+                                  <button
+                                    onClick={async () => {
+                                      await updateClientExtra(c.key, { manualFollowupDone: true });
+                                    }}
+                                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-wider rounded-lg transition-all text-center flex items-center justify-center gap-1"
+                                  >
+                                    Marcar Enviado
+                                  </button>
+                                )}
+                                <button
+                                  onClick={async () => {
+                                    await updateClientExtra(c.key, { manualFollowupDate: "", manualFollowupDone: false });
+                                  }}
+                                  className="py-1.5 px-3 bg-white border border-[#dadce0] hover:bg-slate-100 text-slate-600 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all"
+                                  title="Remover programação"
+                                >
+                                  Excluir
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-center py-10">
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest italic">Nenhum follow-up manual agendado</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : view === 'crm' ? (
             <>
@@ -4148,6 +4562,67 @@ export default function App() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Manual Follow-up Alarm */}
+      <AnimatePresence>
+        {dueFollowups.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-[999] max-w-sm w-full bg-rose-50 border-2 border-rose-500 shadow-2xl p-5 rounded-2xl flex flex-col gap-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-500 flex items-center justify-center text-white shrink-0 animate-bounce">
+                 <AlertCircle size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                 <h4 className="text-xs font-black text-rose-800 uppercase tracking-widest flex items-center gap-2">🚨 ALERTA DE FOLLOW-UP!</h4>
+                 <p className="text-[10px] text-rose-700 font-bold mt-1 uppercase leading-snug">Você tem {dueFollowups.length} pendências agendadas para hoje!</p>
+              </div>
+            </div>
+            
+            <div className="max-h-[180px] overflow-y-auto space-y-2 custom-scrollbar bg-white p-2.5 rounded-xl border border-rose-100">
+               {dueFollowups.map(client => {
+                  const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
+                  return (
+                     <div key={client.key} className="flex flex-col gap-1.5 p-2 bg-slate-50 border border-slate-100 rounded-lg">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                           <div>
+                              <p className="text-xs font-extrabold text-slate-800 leading-tight">{client.nome}</p>
+                              <p className="text-[9px] text-slate-400 font-mono leading-none">{client.telefone}</p>
+                           </div>
+                           {assignedAcc && (
+                              <span className="text-[8px] font-black uppercase text-white px-2 py-0.5 rounded-md leading-none" style={{ backgroundColor: assignedAcc.color }}>
+                                 {assignedAcc.name}
+                              </span>
+                           )}
+                        </div>
+                        <div className="flex gap-2 mt-1">
+                           <a
+                             href={`https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${client.nome}, estou passando para...`)}`}
+                             target="_blank"
+                             rel="noopener noreferrer"
+                             className="flex-1 text-center py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-wider rounded-md transition-all h-7 flex items-center justify-center font-bold"
+                           >
+                             Enviar Zap
+                           </a>
+                           <button
+                             onClick={async () => {
+                               await updateClientExtra(client.key, { manualFollowupDone: true });
+                             }}
+                             className="flex-1 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[9px] font-black uppercase tracking-wider rounded-md transition-all h-7 font-bold"
+                           >
+                             Confirmar Envio
+                           </button>
+                        </div>
+                     </div>
+                  );
+               })}
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
