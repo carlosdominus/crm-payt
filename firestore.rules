@@ -17,13 +17,7 @@ service cloud.firestore {
 
     function isPartner(ownerId) {
       return isSignedIn() && (
-        exists(/databases/$(database)/documents/partnerships/$(ownerId)_$(request.auth.uid)) ||
-        (
-          exists(/databases/$(database)/documents/workspaceConfig/$(ownerId)) &&
-          get(/databases/$(database)/documents/workspaceConfig/$(ownerId)).data.domainAccessEnabled == true &&
-          request.auth.token.email != null &&
-          request.auth.token.email.matches(".*@" + get(/databases/$(database)/documents/workspaceConfig/$(ownerId)).data.ownerDomain + "$")
-        )
+        exists(/databases/$(database)/documents/partnerships/$(ownerId + "_" + request.auth.uid))
       );
     }
 
