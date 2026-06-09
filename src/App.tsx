@@ -1178,14 +1178,16 @@ export default function App() {
   }, [authReady, user, effectiveWorkspaceId]);
 
   const addManualFollowup = async (client: any, dateStr: string) => {
-    const extra = clientExtraData[client.key] || {};
+    if (!client) throw new Error("Cliente inválido ou não selecionado.");
+    const clientKey = client.key || '';
+    const extra = clientExtraData[clientKey] || {};
     const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || client.assignedWhatsappId));
     const zapName = assignedAcc ? `${assignedAcc.name} (${assignedAcc.phoneNumber})` : 'Não Atribuído';
     
     const newFollowup = {
-      clientKey: client.key,
-      nome: client.nome,
-      telefone: client.telefone,
+      clientKey: clientKey,
+      nome: client.nome || 'Sem Nome',
+      telefone: client.telefone || 'Sem Telefone',
       zap: zapName,
       date: dateStr,
       status: 'pending',
@@ -2452,7 +2454,9 @@ export default function App() {
                       <thead>
                         <tr className="bg-[#f8f9fa]">
                           <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-[140px]">Ações</th>
-                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Lead</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">WhatsApp / Zap</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Nome</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Telefone</th>
                           <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Motivo Follow-up</th>
                           <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Tempo Decorrido</th>
                           <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center w-48">Ação Rápida</th>
@@ -2466,6 +2470,7 @@ export default function App() {
                           const pStatus = paymentStatuses[clientKey];
                           const potCount = potsCounts[clientKey];
                           const now = new Date();
+                          const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
 
                           let reason = "";
                           let displayTime = "";
@@ -2556,16 +2561,29 @@ export default function App() {
                                 </div>
                               </td>
 
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]" onClick={e => e.stopPropagation()}>
+                                {assignedAcc ? (
+                                  <span className="inline-block text-[10px] font-black text-white px-2.5 py-0.5 rounded shadow-sm" style={{ backgroundColor: assignedAcc.color }}>
+                                    {assignedAcc.name}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-[#5f6368] bg-slate-100 px-2.5 py-0.5 rounded border border-[#dadce0]">
+                                    Sem Zap
+                                  </span>
+                                )}
+                              </td>
+
                               <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                                 <div className="flex items-center gap-3">
                                   <div className="w-7 h-7 rounded-full flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-xs shrink-0">
                                     {client.nome.charAt(0)}
                                   </div>
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-bold text-modern-text truncate">{client.nome}</p>
-                                    <p className="text-[10px] text-modern-secondary font-semibold">{client.telefone}</p>
-                                  </div>
+                                  <p className="text-xs font-bold text-modern-text truncate">{client.nome}</p>
                                 </div>
+                              </td>
+
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]">
+                                <p className="text-xs font-bold text-modern-secondary">{client.telefone}</p>
                               </td>
 
                               <td className="px-3 py-1 border-b border-r border-[#dadce0]">
@@ -2607,8 +2625,7 @@ export default function App() {
                         })}
                         {followupClients.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-4 py-16 text-center">
-                              <Clock size={36} className="mx-auto text-modern-border mb-3 opacity-20" />
+                            <td colSpan={7} className="px-4 py-16 text-center">
                               <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up automático pendente.</p>
                             </td>
                           </tr>
@@ -2714,13 +2731,19 @@ export default function App() {
                               type="button"
                               onClick={async () => {
                                 if (!manualFollowupDate) {
-                                  alert("Por favor, selecione uma data.");
+                                  alert("Por favor, selecione uma data para o agendamento.");
                                   return;
                                 }
-                                await addManualFollowup(selectedManualClient, manualFollowupDate);
-                                setSelectedManualClient(null);
-                                setManualFollowupDate("");
-                                setManualSearchQuery("");
+                                try {
+                                  await addManualFollowup(selectedManualClient, manualFollowupDate);
+                                  setSelectedManualClient(null);
+                                  setManualFollowupDate("");
+                                  setManualSearchQuery("");
+                                  alert("Agendamento efetuado com sucesso!");
+                                } catch (error: any) {
+                                  console.error("Erro no agendamento:", error);
+                                  alert("Falha ao salvar agendamento: " + (error?.message || error));
+                                }
                               }}
                               className="px-4 py-2.5 bg-modern-primary text-white text-[10px] font-black uppercase tracking-wider rounded-lg shadow-sm hover:bg-slate-800 transition-all self-end"
                             >
@@ -2766,7 +2789,21 @@ export default function App() {
                                       "font-bold",
                                       isTodayOrPast && f.status === 'pending' ? "text-rose-600 underline" : f.status === 'sent' ? "text-emerald-600 line-through" : "text-modern-text"
                                     )}>
-                                      {format(parse(f.date, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}
+                                      {(() => {
+                                        try {
+                                          if (!f.date) return 'Sem Data';
+                                          if (f.date.includes('/')) return f.date;
+                                          if (f.date.includes('-')) {
+                                            const parts = f.date.split('T')[0].split('-');
+                                            if (parts.length === 3) {
+                                              return `${parts[2]}/${parts[1]}/${parts[0]}`;
+                                            }
+                                          }
+                                          return format(parse(f.date, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy');
+                                        } catch (e) {
+                                          return f.date || 'Sem Data';
+                                        }
+                                      })()}
                                     </span>
                                     {isTodayOrPast && f.status === 'pending' && (
                                       <span className="text-[8px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.2 rounded animate-pulse uppercase tracking-tighter">Hoje!</span>
