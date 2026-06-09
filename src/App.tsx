@@ -1301,22 +1301,24 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !effectiveWorkspaceId) return;
 
-    if (!user) {
-      const saved = localStorage.getItem('crm_client_tags');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          const migrated: Record<string, any> = {};
-          Object.entries(parsed).forEach(([key, val]) => {
-            if (val === 'entrar em contato') migrated[key] = 'pendente';
-            else if (val === 'contato enviado' || val === 'feito') migrated[key] = 'vendido';
-            else migrated[key] = val;
-          });
-          setClientTags(migrated);
-        } catch (e) {
-          console.error("Erro ao carregar tags locais:", e);
-        }
+    // Retrieve and normalize any locally saved tags first
+    let localTags: Record<string, any> = {};
+    const saved = localStorage.getItem('crm_client_tags');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        Object.entries(parsed).forEach(([key, val]) => {
+          if (val === 'entrar em contato' || val === 'pendente') localTags[key] = 'reloginho';
+          else if (val === 'contato enviado' || val === 'feito') localTags[key] = 'vendido';
+          else localTags[key] = val;
+        });
+        setClientTags(prev => ({ ...localTags, ...prev }));
+      } catch (e) {
+        console.error("Erro ao carregar tags locais:", e);
       }
+    }
+
+    if (!user) {
       return;
     }
 
@@ -1354,27 +1356,28 @@ export default function App() {
     
     setClientTags(prev => ({ ...prev, [clientKey]: resolvedNewTag }));
 
+    // Always persist to localStorage as cache/fallback
+    const saved = localStorage.getItem('crm_client_tags');
+    const parsed = saved ? JSON.parse(saved) : {};
+    const updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
+    localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
+
     const now = new Date().toISOString();
 
-    if (!user) {
-      const saved = localStorage.getItem('crm_client_tags');
-      const parsed = saved ? JSON.parse(saved) : {};
-      const updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
-      localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
-    } else {
+    if (user) {
       try {
-        const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, clientKey);
+        const cleanClientKey = clientKey.replace(/\//g, '-');
+        const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, cleanClientKey);
         await setDoc(tagRef, {
           clientKey,
           tag: resolvedNewTag,
           updatedAt: now
-        });
+        }, { merge: true });
         setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
         addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${resolvedNewTag}`);
       } catch (error) {
-        // Revert on error
-        setClientTags(prev => ({ ...prev, [clientKey]: clientTags[clientKey] || null }));
-        handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/tags/${clientKey}`);
+        console.error("Firestore tag write failed (using offline fallback):", error);
+        // Do NOT revert! Let the tag stay in local state and localStorage cache.
       }
     }
 
