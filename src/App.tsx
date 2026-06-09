@@ -504,6 +504,12 @@ export default function App() {
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
+  // Follow-up state definitions
+  const [followupMode, setFollowupMode] = useState<'automatic' | 'manual'>('automatic');
+  const [manualSearchQuery, setManualSearchQuery] = useState("");
+  const [selectedManualClient, setSelectedManualClient] = useState<any | null>(null);
+  const [manualFollowupDate, setManualFollowupDate] = useState("");
+  const [manualFollowups, setManualFollowups] = useState<any[]>([]);
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
@@ -1096,12 +1102,22 @@ export default function App() {
         [clientKey]: newData
       }));
 
-      // Sync with Google Sheets if URL is configured
+      // Sync with Google Sheets if URL is configured (Column K: Ações, Column W: ZAP)
       if (sheetSyncUrl) {
         const client = clients.find(c => c.key === clientKey);
         const rowNumber = client?.leads?.[0]?.rowNumber;
         
         if (rowNumber) {
+          const currentTag = clientTags[clientKey];
+          const currentTagText = !currentTag ? '' : (
+            currentTag === 'reloginho' || currentTag === 'pendente' ? 'Pendente' :
+            currentTag === 'contato_sucesso' ? 'Contato Bem Sucedido' :
+            currentTag === 'contato_falha' ? 'Contato Mal Sucedido' :
+            currentTag === 'vendido' ? 'Vendido' :
+            currentTag === 'lixo' ? 'Lixo' : ''
+          );
+          const assignedAccName = updates.assignedWhatsappId ? whatsappAccounts.find(a => a.id === updates.assignedWhatsappId)?.name : (updates.assignedWhatsappId === "" ? "" : (whatsappAccounts.find(a => a.id === currentData.assignedWhatsappId)?.name || ""));
+
           fetch(sheetSyncUrl, {
             method: 'POST',
             mode: 'no-cors', // Google Apps Script requires this for cross-origin without complex headers
@@ -1110,7 +1126,9 @@ export default function App() {
               rowNumber,
               trackingCode: updates.trackingCode !== undefined ? updates.trackingCode : currentData.trackingCode,
               assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : currentData.assignedWhatsappId,
-              assignedWhatsappName: updates.assignedWhatsappId ? whatsappAccounts.find(a => a.id === updates.assignedWhatsappId)?.name : (updates.assignedWhatsappId === "" ? "" : undefined)
+              assignedWhatsappName: assignedAccName,
+              tag: currentTagText,
+              zap: assignedAccName
             })
           }).catch(err => console.error("Sync error:", err));
         }
@@ -1126,6 +1144,113 @@ export default function App() {
   const [paymentStatuses, setPaymentStatuses] = useState<Record<string, any>>({});
   const [potsCounts, setPotsCounts] = useState<Record<string, number>>({});
   const [interactionLogs, setInteractionLogs] = useState<Record<string, InteractionLog[]>>({});
+
+  // Synchronize manual follow-ups from Firestore or LocalStorage
+  useEffect(() => {
+    if (!authReady) return;
+
+    if (!user || !effectiveWorkspaceId) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      if (saved) {
+        try {
+          const list = JSON.parse(saved);
+          list.sort((a: any, b: any) => a.date.localeCompare(b.date));
+          setManualFollowups(list);
+        } catch (e) {
+          console.error("Erro ao carregar follow-ups manuais locais:", e);
+        }
+      }
+      return;
+    }
+
+    const unsubscribe = onSnapshot(collection(db, `users/${effectiveWorkspaceId}/manualFollowups`), (snapshot) => {
+      const list: any[] = [];
+      snapshot.docs.forEach(doc => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      list.sort((a: any, b: any) => a.date.localeCompare(b.date));
+      setManualFollowups(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/manualFollowups`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, user, effectiveWorkspaceId]);
+
+  const addManualFollowup = async (client: any, dateStr: string) => {
+    const extra = clientExtraData[client.key] || {};
+    const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || client.assignedWhatsappId));
+    const zapName = assignedAcc ? `${assignedAcc.name} (${assignedAcc.phoneNumber})` : 'Não Atribuído';
+    
+    const newFollowup = {
+      clientKey: client.key,
+      nome: client.nome,
+      telefone: client.telefone,
+      zap: zapName,
+      date: dateStr,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!user || !effectiveWorkspaceId) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      const parsed = saved ? JSON.parse(saved) : [];
+      const updated = [...parsed, { id: Date.now().toString(), ...newFollowup }];
+      updated.sort((a: any, b: any) => a.date.localeCompare(b.date));
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    try {
+      const docRef = doc(collection(db, `users/${effectiveWorkspaceId}/manualFollowups`));
+      await setDoc(docRef, newFollowup);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups`);
+    }
+  };
+
+  const markManualFollowupSent = async (followupId: string, clientKey: string, telefone: string) => {
+    const cleanNum = telefone.replace(/\D/g, '');
+    const msg = `Olá!`;
+    const url = `https://wa.me/${cleanNum}?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+
+    if (!user || !effectiveWorkspaceId) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      const parsed = saved ? JSON.parse(saved) : [];
+      const updated = parsed.map((f: any) => f.id === followupId ? { ...f, status: 'sent' } : f);
+      updated.sort((a: any, b: any) => a.date.localeCompare(b.date));
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    try {
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, followupId);
+      await setDoc(docRef, { status: 'sent' }, { merge: true });
+      addInteractionLog(clientKey, 'tag_change', `Follow-up manual marcado como enviado.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${followupId}`);
+    }
+  };
+
+  const deleteManualFollowup = async (followupId: string) => {
+    if (!user || !effectiveWorkspaceId) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      const parsed = saved ? JSON.parse(saved) : [];
+      const updated = parsed.filter((f: any) => f.id !== followupId);
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, followupId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/manualFollowups/${followupId}`);
+    }
+  };
 
   useEffect(() => {
     if (!authReady || !effectiveWorkspaceId) return;
@@ -1208,14 +1333,10 @@ export default function App() {
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
     
-    // Use functional update to ensure we have the absolute latest state
-    let resolvedNewTag: ClientTag | null = null;
+    // Always set to the clicked tag (never toggles to null as requested: "NUNCA pode sair, a não ser quando eu quiser mudar")
+    const resolvedNewTag: ClientTag = tag;
     
-    setClientTags(prev => {
-      const current = prev[clientKey];
-      resolvedNewTag = current === tag ? null : tag;
-      return { ...prev, [clientKey]: resolvedNewTag };
-    });
+    setClientTags(prev => ({ ...prev, [clientKey]: resolvedNewTag }));
 
     const now = new Date().toISOString();
 
@@ -1224,19 +1345,9 @@ export default function App() {
       const parsed = saved ? JSON.parse(saved) : {};
       const updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
       localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
-      return;
-    }
-    
-    try {
-      const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, clientKey);
-      if (resolvedNewTag === null) {
-        await deleteDoc(tagRef);
-        setTagTimestamps(prev => {
-          const next = { ...prev };
-          delete next[clientKey];
-          return next;
-        });
-      } else {
+    } else {
+      try {
+        const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, clientKey);
         await setDoc(tagRef, {
           clientKey,
           tag: resolvedNewTag,
@@ -1244,14 +1355,53 @@ export default function App() {
         });
         setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
         addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${resolvedNewTag}`);
+      } catch (error) {
+        // Revert on error
+        setClientTags(prev => ({ ...prev, [clientKey]: clientTags[clientKey] || null }));
+        handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/tags/${clientKey}`);
       }
-    } catch (error) {
-      // Revert on error
-      setClientTags(prev => ({ ...prev, [clientKey]: clientTags[clientKey] }));
-      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/tags/${clientKey}`);
     }
 
-    // Sync to Google Sheets if webhook is configured
+    // Sync to Google Sheets if sheetSyncUrl is configured (Column K: Ações, Column W: ZAP)
+    if (sheetSyncUrl) {
+      try {
+        const client = clients.find(c => c.key === clientKey);
+        const rowNumber = client?.leads?.[0]?.rowNumber;
+        
+        if (rowNumber) {
+          const currentData = clientExtraData[clientKey] || {};
+          const assignedWhatsappId = currentData.assignedWhatsappId || client?.assignedWhatsappId;
+          const assignedAcc = whatsappAccounts.find(a => a.id === assignedWhatsappId);
+          const assignedAccName = assignedAcc ? assignedAcc.name : '';
+          
+          const currentTagText = !resolvedNewTag ? '' : (
+            resolvedNewTag === 'reloginho' || resolvedNewTag === 'pendente' ? 'Pendente' :
+            resolvedNewTag === 'contato_sucesso' ? 'Contato Bem Sucedido' :
+            resolvedNewTag === 'contato_falha' ? 'Contato Mal Sucedido' :
+            resolvedNewTag === 'vendido' ? 'Vendido' :
+            resolvedNewTag === 'lixo' ? 'Lixo' : ''
+          );
+
+          await fetch(sheetSyncUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rowNumber,
+              trackingCode: currentData.trackingCode || '',
+              assignedWhatsappId: assignedWhatsappId || '',
+              assignedWhatsappName: assignedAccName,
+              tag: currentTagText,
+              zap: assignedAccName
+            })
+          }).catch(err => console.error("Sheet sync error for tag:", err));
+        }
+      } catch (err) {
+        console.error("Error syncing tag to spreadsheet:", err);
+      }
+    }
+
+    // Sync to Google Sheets webhooks if configured
     if (webhookUrl) {
       try {
         const client = clients.find(c => c.key === clientKey);
@@ -1263,7 +1413,7 @@ export default function App() {
             type: 'tag_update',
             clientKey,
             tag: resolvedNewTag || 'limpar',
-            label: !resolvedNewTag ? '' : (resolvedNewTag === 'vendido' ? 'Vendido' : resolvedNewTag === 'reloginho' || resolvedNewTag === 'pendente' ? 'Pendente' : 'Lixo'),
+            label: resolvedNewTag === 'vendido' ? 'Vendido' : resolvedNewTag === 'reloginho' || resolvedNewTag === 'pendente' ? 'Pendente' : 'Lixo',
             nome: client?.nome || '',
             telefone: client?.telefone || '',
             email: client?.email || '',
@@ -1974,6 +2124,70 @@ export default function App() {
     });
   }, [enrichedClients, clientTags, tagTimestamps, paymentStatuses, potsCounts]);
 
+  const activeAlarmFollowups = useMemo(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    return manualFollowups.filter((f: any) => f.status === 'pending' && f.date <= todayStr);
+  }, [manualFollowups]);
+
+  const manualFilteredClients = useMemo(() => {
+    if (!manualSearchQuery.trim()) return [];
+    const q = manualSearchQuery.toLowerCase().trim();
+    return enrichedClients.filter(c => 
+      c.nome.toLowerCase().includes(q) || 
+      c.telefone.includes(q)
+    ).slice(0, 5);
+  }, [enrichedClients, manualSearchQuery]);
+
+  const alarmIntervalRef = useRef<any>(null);
+
+  const playAlarmSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, now);
+      osc1.frequency.linearRampToValueAtTime(1200, now + 0.15);
+      osc1.frequency.linearRampToValueAtTime(880, now + 0.3);
+      
+      gain1.gain.setValueAtTime(0.12, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.35);
+    } catch (e) {
+      console.error("Erro ao tocar som de alarme:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeAlarmFollowups.length > 0) {
+      if (!alarmIntervalRef.current) {
+        playAlarmSound();
+        alarmIntervalRef.current = setInterval(() => {
+          playAlarmSound();
+        }, 1500);
+      }
+    } else {
+      if (alarmIntervalRef.current) {
+        clearInterval(alarmIntervalRef.current);
+        alarmIntervalRef.current = null;
+      }
+    }
+    return () => {
+      if (alarmIntervalRef.current) {
+        clearInterval(alarmIntervalRef.current);
+        alarmIntervalRef.current = null;
+      }
+    };
+  }, [activeAlarmFollowups]);
+
   const whatsappStats = useMemo(() => {
     const distributionMap = new Map<string, number>();
     const salesValueMap = new Map<string, number>();
@@ -2195,121 +2409,413 @@ export default function App() {
         
         <div className="flex-1 overflow-hidden flex flex-col">
           {view === 'followup' ? (
-            <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-              <div className="flex items-center justify-between">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 md:p-8 md:space-y-8 custom-scrollbar">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-bold text-modern-text">Dashboard de Follow-up</h2>
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-modern-secondary mt-1">Leads aguardando retorno baseado em regras de tempo</p>
+                  <h2 className="text-xl font-bold text-modern-text">Dashboard de Follow-up</h2>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary mt-1">
+                    {followupMode === 'automatic' ? 'Leads aguardando retorno baseado em regras de tempo' : 'Gerencie e agende follow-ups manuais de clientes'}
+                  </p>
                 </div>
-                <div className="bg-white border border-modern-border px-6 py-4 shadow-sm flex items-center gap-4">
-                   <Clock size={20} className="text-modern-primary" />
-                   <div>
-                     <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest leading-none mb-1">Aguardando Retorno</p>
-                     <p className="text-xl font-black text-modern-text leading-none">{followupClients.length}</p>
-                   </div>
+                
+                {/* Segmented Switch: Automático vs Manual */}
+                <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 shrink-0 border border-modern-border select-none self-start">
+                  <button
+                    onClick={() => setFollowupMode('automatic')}
+                    className={cn(
+                      "px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all",
+                      followupMode === 'automatic'
+                        ? "bg-white text-modern-primary shadow-sm"
+                        : "text-modern-secondary hover:text-modern-primary"
+                    )}
+                  >
+                    Automático
+                  </button>
+                  <button
+                    onClick={() => setFollowupMode('manual')}
+                    className={cn(
+                      "px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all",
+                      followupMode === 'manual'
+                        ? "bg-white text-modern-primary shadow-sm"
+                        : "text-modern-secondary hover:text-modern-primary"
+                    )}
+                  >
+                    Manual
+                  </button>
                 </div>
               </div>
 
-              <div className="bg-white border border-modern-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-separate border-spacing-0">
-                    <thead>
-                      <tr className="bg-[#f8f9fa]">
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Lead</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Motivo Follow-up</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-r border-[#dadce0]">Tempo Decorrido</th>
-                        <th className="px-4 py-3 text-[11px] font-black text-modern-secondary uppercase tracking-widest border-b border-[#dadce0] text-center">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {followupClients.map(client => {
-                        const tag = clientTags[client.key];
-                        const tagDateStr = tagTimestamps[client.key];
-                        const pStatus = paymentStatuses[client.key];
-                        const potCount = potsCounts[client.key];
-                        const now = new Date();
+              {followupMode === 'automatic' ? (
+                <div className="bg-white rounded-xl border border-modern-border shadow-sm overflow-hidden flex flex-col">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-separate border-spacing-0 bg-white">
+                      <thead>
+                        <tr className="bg-[#f8f9fa]">
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] text-center w-[140px]">Ações</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Lead</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Motivo Follow-up</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Tempo Decorrido</th>
+                          <th className="px-3 py-1.5 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center w-48">Ação Rápida</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {followupClients.map(client => {
+                          const clientKey = client.key;
+                          const currentTag = clientTags[clientKey];
+                          const tagDateStr = tagTimestamps[clientKey];
+                          const pStatus = paymentStatuses[clientKey];
+                          const potCount = potsCounts[clientKey];
+                          const now = new Date();
 
-                        let reason = "";
-                        let displayTime = "";
-                        
-                        if (tag === 'reloginho' && tagDateStr) {
-                           reason = "Follow-up Manual (Reloginho)";
-                           displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
-                        } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Pix Enviado";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Link de Pagamento";
-                           displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
-                        } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
-                           reason = "Cobrança de Boleto";
-                           displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
-                        } else if (potCount > 0 && client.lastPurchaseDate) {
-                           reason = `Recompra - ${potCount} Pote(s)`;
-                           displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
-                        }
+                          let reason = "";
+                          let displayTime = "";
+                          
+                          if (currentTag === 'reloginho' && tagDateStr) {
+                             reason = "Follow-up Manual (Reloginho)";
+                             displayTime = `${differenceInDays(now, new Date(tagDateStr))} dias`;
+                          } else if (pStatus?.status === 'pix_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Pix Enviado";
+                             displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                          } else if (pStatus?.status === 'link_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Link de Pagamento";
+                             displayTime = `${differenceInHours(now, new Date(pStatus.updatedAt))} horas`;
+                          } else if (pStatus?.status === 'boleto_enviado' && pStatus?.updatedAt) {
+                             reason = "Cobrança de Boleto";
+                             displayTime = `${differenceInDays(now, new Date(pStatus.updatedAt))} dias`;
+                          } else if (potCount > 0 && client.lastPurchaseDate) {
+                             reason = `Recompra - ${potCount} Pote(s)`;
+                             displayTime = `${differenceInDays(now, new Date(client.lastPurchaseDate))} dias desde a compra`;
+                          }
 
-                        return (
-                          <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer" onClick={() => { setSelectedClient(client); setView('crm'); }}>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-[11px]">
-                                  {client.nome.charAt(0)}
+                          return (
+                            <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer text-xs" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                              
+                              {/* 1. Column: Action/Tag selection buttons identical to main table */}
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-1 justify-center">
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'reloginho')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'reloginho' 
+                                        ? "bg-amber-100 border-amber-200 text-amber-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Pendente (Follow-up)"
+                                  >
+                                    <Clock size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'contato_sucesso')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'contato_sucesso' 
+                                        ? "bg-emerald-100 border-emerald-200 text-emerald-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Contato Bem Sucedido"
+                                  >
+                                    <UserCheck size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'contato_falha')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'contato_falha' 
+                                        ? "bg-purple-100 border-purple-200 text-purple-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Contato Mal Sucedido"
+                                  >
+                                    <UserX size={12} className={cn(currentTag === 'contato_falha' && "text-purple-600")} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'vendido')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'vendido' 
+                                        ? "bg-emerald-500 border-emerald-600 text-white" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Vendido"
+                                  >
+                                    <CheckCircle2 size={12} />
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleTag(clientKey, 'lixo')}
+                                    className={cn(
+                                      "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
+                                      currentTag === 'lixo' 
+                                        ? "bg-rose-100 border-rose-200 text-rose-600" 
+                                        : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
+                                    )}
+                                    title="Lixo (Número Inválido)"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
                                 </div>
-                                <div>
-                                  <p className="text-xs font-bold text-modern-text">{client.nome}</p>
-                                  <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                              </td>
+
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center bg-modern-primary/10 text-modern-primary font-black text-xs shrink-0">
+                                    {client.nome.charAt(0)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-modern-text truncate">{client.nome}</p>
+                                    <p className="text-[10px] text-modern-secondary font-semibold">{client.telefone}</p>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                              <div className="flex items-center gap-2">
-                                 <AlertCircle size={14} className="text-orange-500" />
-                                 <span className="text-[11px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-4 border-b border-r border-[#dadce0]">
-                               <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
-                            </td>
-                            <td className="px-4 py-4 border-b border-[#dadce0]">
-                              <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
-                                 <button 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     const msg = `Olá ${client.nome}, estou passando para...`;
-                                     const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                                     window.open(url, '_blank');
-                                   }}
-                                   className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
-                                 >
-                                   Chamar no Zap
-                                 </button>
-                                 <button 
-                                   onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleTag(client.key, 'contato_sucesso');
-                                   }}
-                                   className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-                                 >
-                                   Resolvido
-                                 </button>
-                              </div>
+                              </td>
+
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]">
+                                <div className="flex items-center gap-1.5">
+                                   <AlertCircle size={13} className="text-orange-500 shrink-0" />
+                                   <span className="text-[10px] font-bold text-modern-text uppercase tracking-tight">{reason}</span>
+                                </div>
+                              </td>
+
+                              <td className="px-3 py-1 border-b border-r border-[#dadce0]">
+                                 <p className="text-xs font-bold text-modern-secondary">{displayTime}</p>
+                              </td>
+
+                              <td className="px-3 py-1 border-b border-[#dadce0]" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-center gap-1.5">
+                                   <button 
+                                     onClick={() => {
+                                       const msg = `Olá ${client.nome}, estou passando para...`;
+                                       const url = `https://wa.me/${client.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                                       window.open(url, '_blank');
+                                     }}
+                                     className="px-2.5 py-1 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider rounded shadow-sm hover:bg-emerald-700 transition-all shrink-0"
+                                   >
+                                     Zap
+                                   </button>
+                                   <button 
+                                     onClick={() => {
+                                        toggleTag(client.key, 'contato_sucesso');
+                                     }}
+                                     className="px-2.5 py-1 bg-white border border-modern-border text-modern-secondary text-[9px] font-black uppercase tracking-wider rounded hover:bg-slate-50 transition-all shrink-0"
+                                   >
+                                     Resolvido
+                                   </button>
+                                </div>
+                              </td>
+
+                            </tr>
+                          );
+                        })}
+                        {followupClients.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-16 text-center">
+                              <Clock size={36} className="mx-auto text-modern-border mb-3 opacity-20" />
+                              <p className="text-[11px] font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up automático pendente.</p>
                             </td>
                           </tr>
-                        );
-                      })}
-                      {followupClients.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="px-4 py-20 text-center">
-                            <Clock size={40} className="mx-auto text-modern-border mb-4 opacity-20" />
-                            <p className="text-sm font-bold text-modern-secondary uppercase tracking-widest">Tudo em dia! Nenhum follow-up pendente.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* MANUAL FOLLOW-UP MODE */
+                <div className="space-y-6">
+                  {/* Local / Form to Schedule Follow-up */}
+                  <div className="bg-white border border-modern-border rounded-xl p-5 shadow-sm space-y-4">
+                    <h3 className="text-xs font-bold text-modern-text uppercase tracking-wider border-b border-slate-100 pb-2">Agendar Novo Follow-up Manual</h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Search Client */}
+                      <div className="space-y-1.5 relative">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block">1. Buscar Cliente (Nome ou Telefone)</label>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-modern-secondary" size={14} />
+                          <input
+                            type="text"
+                            value={manualSearchQuery}
+                            onChange={(e) => {
+                              setManualSearchQuery(e.target.value);
+                              if (selectedManualClient) setSelectedManualClient(null);
+                            }}
+                            placeholder="Digite o nome ou telefone..."
+                            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                          />
+                        </div>
+
+                        {/* Search Results Dropdown */}
+                        {manualFilteredClients.length > 0 && !selectedManualClient && (
+                          <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-modern-border rounded-lg shadow-lg z-30 overflow-hidden divide-y divide-slate-100 max-h-[180px] overflow-y-auto custom-scrollbar">
+                            {manualFilteredClients.map((client) => {
+                              const extra = clientExtraData[client.key] || {};
+                              const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || client.assignedWhatsappId));
+                              return (
+                                <button
+                                  key={client.key}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedManualClient(client);
+                                    setManualSearchQuery(client.nome);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 transition-all flex items-center justify-between"
+                                >
+                                  <div>
+                                    <p className="font-bold text-modern-text">{client.nome}</p>
+                                    <p className="text-[10px] text-modern-secondary">{client.telefone}</p>
+                                  </div>
+                                  {assignedAcc && (
+                                    <span className="text-[9px] font-black text-white px-2 py-0.5 rounded shadow-sm" style={{ backgroundColor: assignedAcc.color }}>
+                                      {assignedAcc.name}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Select Day */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block">2. Escolher o dia do Follow-up</label>
+                        <input
+                          type="date"
+                          value={manualFollowupDate}
+                          onChange={(e) => setManualFollowupDate(e.target.value)}
+                          className="w-full px-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Selected Client Card Section */}
+                    {selectedManualClient && (() => {
+                      const extra = clientExtraData[selectedManualClient.key] || {};
+                      const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || selectedManualClient.assignedWhatsappId));
+                      return (
+                        <div className="p-3 bg-slate-50 border border-modern-border rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest mb-1">Cliente Selecionado</p>
+                            <h4 className="text-xs font-bold text-modern-text">{selectedManualClient.nome}</h4>
+                            <p className="text-[11px] font-semibold text-modern-secondary">{selectedManualClient.telefone}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <p className="text-[9px] font-black uppercase text-modern-secondary tracking-widest mb-0.5">WhatsApp / Zap Cadastrado</p>
+                              {assignedAcc ? (
+                                <span className="inline-block text-[10px] font-black text-white px-2.5 py-1 rounded shadow-sm" style={{ backgroundColor: assignedAcc.color }}>
+                                  {assignedAcc.name} ({assignedAcc.phoneNumber})
+                                </span>
+                              ) : (
+                                <span className="inline-block text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded">
+                                  Sem Zap Vinculado
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!manualFollowupDate) {
+                                  alert("Por favor, selecione uma data.");
+                                  return;
+                                }
+                                await addManualFollowup(selectedManualClient, manualFollowupDate);
+                                setSelectedManualClient(null);
+                                setManualFollowupDate("");
+                                setManualSearchQuery("");
+                              }}
+                              className="px-4 py-2.5 bg-modern-primary text-white text-[10px] font-black uppercase tracking-wider rounded-lg shadow-sm hover:bg-slate-800 transition-all self-end"
+                            >
+                              Agendar Follow-up
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Manual Followups List Table */}
+                  <div className="bg-white border border-modern-border rounded-xl shadow-sm overflow-hidden flex flex-col">
+                    <div className="p-4 border-b border-modern-border bg-slate-50">
+                      <h3 className="text-xs font-bold text-modern-text uppercase tracking-wider">Histórico e Agendamentos Manuais</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-separate border-spacing-0 bg-white">
+                        <thead>
+                          <tr className="bg-[#f8f9fa]">
+                            <th className="px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Cliente</th>
+                            <th className="px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">Data Agendada</th>
+                            <th className="px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0]">WhatsApp / Zap</th>
+                            <th className="px-3 py-2 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-[#dadce0] text-center w-52">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {manualFollowups.map((f) => {
+                            const todayStr = format(new Date(), 'yyyy-MM-dd');
+                            const isTodayOrPast = f.date <= todayStr;
+                            return (
+                              <tr key={f.id} className="hover:bg-slate-50 transition-all text-xs">
+                                <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                                  <div>
+                                    <p className="font-bold text-modern-text">{f.nome}</p>
+                                    <p className="text-[10px] text-modern-secondary leading-tight">{f.telefone}</p>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                                  <div className="flex items-center gap-1.5">
+                                    <Calendar size={12} className={cn(isTodayOrPast && f.status === 'pending' ? "text-rose-500" : "text-modern-secondary")} />
+                                    <span className={cn(
+                                      "font-bold",
+                                      isTodayOrPast && f.status === 'pending' ? "text-rose-600 underline" : f.status === 'sent' ? "text-emerald-600 line-through" : "text-modern-text"
+                                    )}>
+                                      {format(parse(f.date, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy')}
+                                    </span>
+                                    {isTodayOrPast && f.status === 'pending' && (
+                                      <span className="text-[8px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.2 rounded animate-pulse uppercase tracking-tighter">Hoje!</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 border-b border-r border-[#dadce0]">
+                                  <span className="text-[10px] font-bold text-modern-secondary">{f.zap}</span>
+                                </td>
+                                <td className="px-3 py-2 border-b border-[#dadce0]">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {f.status === 'pending' ? (
+                                      <button
+                                        onClick={() => markManualFollowupSent(f.id, f.clientKey, f.telefone)}
+                                        className="px-2.5 py-1 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider rounded shadow-sm hover:bg-emerald-700 transition-all shrink-0"
+                                      >
+                                        Chamar & Concluir
+                                      </button>
+                                    ) : (
+                                      <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-2 py-1 rounded uppercase tracking-wider border border-emerald-200">
+                                        Mensagem Enviada
+                                      </span>
+                                    )}
+                                    <button
+                                      onClick={() => deleteManualFollowup(f.id)}
+                                      className="px-2 py-1 bg-white hover:bg-rose-50 border border-modern-border hover:border-rose-200 text-modern-secondary hover:text-rose-500 rounded transition-all shrink-0"
+                                      title="Deletar Follow-up"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {manualFollowups.length === 0 && (
+                            <tr>
+                              <td colSpan={4} className="px-4 py-12 text-center text-slate-400">
+                                <Calendar size={28} className="mx-auto mb-2 opacity-30 text-modern-secondary" />
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-modern-secondary">Nenhum follow-up manual agendado.</p>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : view === 'crm' ? (
             <>
@@ -2625,12 +3131,12 @@ export default function App() {
                               className={cn(
                                 "w-6 h-6 rounded-md flex items-center justify-center transition-all border",
                                 currentTag === 'contato_falha' 
-                                  ? "bg-gray-100 border-gray-300 text-gray-800" 
+                                  ? "bg-purple-100 border-purple-200 text-purple-600" 
                                   : "bg-white border-[#dadce0] text-[#5f6368] hover:bg-slate-50"
                               )}
                               title="Contato Mal Sucedido"
                             >
-                              <UserX size={12} />
+                              <UserX size={12} className={cn(currentTag === 'contato_falha' && "text-purple-600")} />
                             </button>
                             <button 
                               onClick={() => toggleTag(clientKey, 'vendido')}
@@ -2821,7 +3327,7 @@ export default function App() {
                               !currentTag ? "bg-[#DBEAFE] text-blue-700" :
                               (currentTag === 'pendente' || currentTag === 'reloginho') ? "bg-[#FEF3C6] text-amber-700" : 
                               (currentTag === 'vendido' || currentTag === 'contato_sucesso') ? "bg-[#D0FBE5] text-emerald-700" :
-                              currentTag === 'contato_falha' ? "bg-gray-100 text-gray-700" :
+                              currentTag === 'contato_falha' ? "bg-[#F3E8FF] text-purple-700 border border-purple-200" :
                               currentTag === 'lixo' ? "bg-[#FFE3E6] text-rose-700" :
                               "bg-slate-100 text-slate-600"
                             )}>
