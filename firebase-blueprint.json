@@ -53,6 +53,21 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["clientKey", "updatedAt"]
+    },
+    "ManualFollowup": {
+      "title": "Manual Follow-up",
+      "description": "Scheduled manual follow-ups for clients",
+      "type": "object",
+      "properties": {
+        "clientKey": { "type": "string" },
+        "nome": { "type": "string" },
+        "telefone": { "type": "string" },
+        "zap": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientKey", "nome", "telefone", "zap", "date", "status"]
     }
   },
   "firestore": {
@@ -71,6 +86,10 @@
     "/users/{userId}/clientData/{clientKey}": {
       "schema": "ClientData",
       "description": "Extra client-specific data"
+    },
+    "/users/{userId}/manualFollowups/{followupId}": {
+      "schema": "ManualFollowup",
+      "description": "Scheduled manual follow-ups"
     }
   }
 }
