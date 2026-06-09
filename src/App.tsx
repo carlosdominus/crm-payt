@@ -503,6 +503,8 @@ export default function App() {
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'partners'>('general');
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
+  const [sheetCsvUrl, setSheetCsvUrl] = useState(() => localStorage.getItem('crm_sheet_csv_url') || SHEET_CSV_URL);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
   // Follow-up state definitions
   const [followupMode, setFollowupMode] = useState<'automatic' | 'manual'>('automatic');
@@ -1590,8 +1592,9 @@ export default function App() {
 
   const fetchData = async () => {
     setRefreshing(true);
+    setFetchError(null);
     try {
-      const response = await fetch(SHEET_CSV_URL);
+      const response = await fetch(sheetCsvUrl || SHEET_CSV_URL);
       const csvText = await response.text();
       
       Papa.parse(csvText, {
@@ -1899,12 +1902,14 @@ export default function App() {
         },
         error: (error: any) => {
           console.error("Erro ao processar CSV:", error);
+          setFetchError("Erro ao processar o formato do CSV. Verifique a estrutura da planilha.");
           setLoading(false);
           setRefreshing(false);
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao buscar dados:", error);
+      setFetchError(error instanceof Error ? error.message : "Falha na conexão de rede com o Google Sheets.");
       setLoading(false);
       setRefreshing(false);
     }
@@ -1912,12 +1917,12 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    // Background auto-refresh interval: fetch silently every 15 seconds
+    // Background auto-refresh interval: fetch silently every 60 seconds to avoid Google Sheets API rate-limiting
     const intervalId = setInterval(() => {
       fetchData();
-    }, 15000);
+    }, 60000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [sheetCsvUrl]);
 
   const enrichedClients = useMemo(() => {
     // Map manual sales to client keys for faster lookup
@@ -2410,6 +2415,40 @@ export default function App() {
         </header>
         
         <div className="flex-1 overflow-hidden flex flex-col">
+          {fetchError && (
+            <div className="mx-6 mt-4 p-4 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-between text-rose-800 text-xs font-semibold gap-4 shadow-sm relative z-50">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
+                <span>{fetchError} (Verifique se sua planilha do Google Sheets está pública ou se excedeu o limite de requisições)</span>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <button 
+                  onClick={() => {
+                    setFetchError(null);
+                    fetchData();
+                  }}
+                  className="px-2.5 py-1 bg-white border border-rose-300 hover:bg-rose-100 text-rose-700 transition-all font-bold uppercase tracking-wider text-[10px] rounded cursor-pointer"
+                >
+                  Tentar Novamente
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowSettings(true);
+                  }}
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white transition-all font-bold uppercase tracking-wider text-[10px] rounded cursor-pointer"
+                >
+                  Ajustar URL
+                </button>
+                <button 
+                  onClick={() => setFetchError(null)}
+                  className="text-rose-400 hover:text-rose-600 font-bold px-1 text-sm cursor-pointer"
+                  title="Fechar"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
           {view === 'followup' ? (
             <div className="flex-1 overflow-y-auto p-6 space-y-6 md:p-8 md:space-y-8 custom-scrollbar">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -4220,24 +4259,36 @@ export default function App() {
 
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL do Webhook (Receber Leads)</label>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL da Planilha de Importação (Leads CSV)</label>
+                        <input 
+                          type="text" 
+                          value={sheetCsvUrl}
+                          onChange={(e) => setSheetCsvUrl(e.target.value)}
+                          placeholder="Link para a exportação CSV da Planilha"
+                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
+                        <p className="text-[9px] text-modern-secondary font-medium px-1">Insira a URL de exportação em CSV de sua própria planilha ou deixe o link padrão.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary font-sans">URL do Webhook (Receber Leads)</label>
                         <input 
                           type="text" 
                           value={webhookUrl}
                           onChange={(e) => setWebhookUrl(e.target.value)}
                           placeholder="URL para receber dados da planilha"
-                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all font-sans"
                         />
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">URL de Sincronização (Exportar)</label>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary font-sans">URL de Sincronização (Exportar)</label>
                         <input 
                           type="text" 
                           value={sheetSyncUrl}
                           onChange={(e) => setSheetSyncUrl(e.target.value)}
                           placeholder="URL do Web App p/ atualizar sua planilha"
-                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                          className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all font-sans"
                         />
                       </div>
                     </div>
@@ -4393,6 +4444,7 @@ export default function App() {
                   onClick={() => {
                     localStorage.setItem('crm_webhook_url', webhookUrl);
                     localStorage.setItem('crm_sheet_sync_url', sheetSyncUrl);
+                    localStorage.setItem('crm_sheet_csv_url', sheetCsvUrl);
                     setShowSettings(false);
                   }}
                   className="w-full bg-modern-text text-white py-4 font-bold text-sm uppercase tracking-widest hover:bg-black transition-all flex items-center justify-center gap-2"
