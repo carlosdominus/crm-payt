@@ -135,6 +135,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return filteredSalesForDash.length;
   }, [filteredSalesForDash]);
 
+  const commissionMonth = useMemo(() => {
+    const currentYearMonth = format(new Date(), 'yyyy-MM');
+    return manualSales.reduce((acc, curr) => {
+      const saleYearMonth = curr.date.substring(0, 7);
+      if (saleYearMonth === currentYearMonth) {
+        return acc + curr.commission;
+      }
+      return acc;
+    }, 0);
+  }, [manualSales]);
+
   const dashDailySalesAndCommission = useMemo(() => {
     const dailyMap = new Map<string, { date: string; formattedDate: string; count: number; commission: number; value: number }>();
     filteredSalesForDash.forEach(sale => {
@@ -274,21 +285,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const salesValueMap = new Map<string, number>();
     const salesCountMap = new Map<string, number>();
     
-    filteredClientsForDash.forEach(client => {
-      const tag = getClientTag(client);
-      if (tag === 'lixo') return;
-      const whatsappId = client.assignedWhatsappId;
+    filteredSalesForDash.forEach(sale => {
+      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      const whatsappId = client?.assignedWhatsappId;
       const account = whatsappAccounts.find(a => a.id === whatsappId);
       const name = account ? account.name : 'Não Atribuído';
-      const relevantSales = (client.leads || []).flatMap(lead => {
-         // finding matching sales for client key
-         return manualSales.filter(sale => sale.clientKey === client.key && isWithinDashFilter(sale.timestamp || sale.date));
-      });
-      const totalValue = relevantSales.reduce((acc, s) => acc + s.value, 0);
-      if (totalValue > 0) {
-        salesValueMap.set(name, (salesValueMap.get(name) || 0) + totalValue);
-        salesCountMap.set(name, (salesCountMap.get(name) || 0) + relevantSales.length);
-      }
+      
+      salesValueMap.set(name, (salesValueMap.get(name) || 0) + sale.value);
+      salesCountMap.set(name, (salesCountMap.get(name) || 0) + 1);
     });
     
     const salesData = whatsappAccounts.map(acc => ({
@@ -307,7 +311,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       });
     }
     return salesData;
-  }, [filteredClientsForDash, whatsappAccounts, manualSales, dashDateFilter, dashStartDate, dashEndDate, getClientTag]);
+  }, [filteredSalesForDash, enrichedClients, whatsappAccounts]);
+
+  const dashManualSalesByProduct = useMemo(() => {
+    const productMap = new Map<string, { name: string; value: number }>();
+    filteredSalesForDash.forEach(sale => {
+      const productName = sale.productName || 'Não Especificado';
+      const cleanedName = productName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+      const existing = productMap.get(cleanedName) || { name: cleanedName, value: 0 };
+      existing.value += sale.value;
+      productMap.set(cleanedName, existing);
+    });
+    return Array.from(productMap.values()).sort((a, b) => b.value - a.value).slice(0, 8);
+  }, [filteredSalesForDash]);
 
   const dashLeadsComparisonTimeline = useMemo(() => {
     const dailyMap = new Map<string, { date: string; formattedDate: string; novosLeads: number; reloginhos: number; vendidos: number }>();
@@ -637,13 +653,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Clientes Únicos</p>
-                    <h4 className="text-xl font-black text-slate-800 mt-1 font-mono">
-                      {new Set(filteredSalesForDash.map(s => s.clientKey)).size}
+                    <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Comissão (Mês)</p>
+                    <h4 className="text-xl font-black text-rose-600 mt-1 font-mono">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(commissionMonth)}
                     </h4>
                   </div>
-                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-                    <Users size={18} />
+                  <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
+                    <DollarSign size={18} />
                   </div>
                 </div>
 
@@ -988,6 +1004,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 </div>
 
+                {/* Vendas Manuais por Produto */}
+                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-[#101010] mb-4 font-sans">Vendas Manuais por Produto</h3>
+                  <div className="h-[225px] w-full">
+                    {dashManualSalesByProduct.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={dashManualSalesByProduct} layout="vertical" margin={{ left: 10, right: 10 }}>
+                          <XAxis type="number" tick={{ fontSize: 9 }} tickLine={false} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 9 }} width={120} tickLine={false} />
+                          <Tooltip formatter={(value: any) => [new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value), 'Faturamento']} />
+                          <Bar dataKey="value" fill="#10b981" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-slate-400 text-xs flex items-center justify-center h-full">Nenhuma venda manual registrada no período</div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Map DDD layout */}
                 <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col justify-between">
                   <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Distribuição por DDD / Local no Brasil</h3>
@@ -1054,8 +1089,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </>
                       ) : (
                         <>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Src</th>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Sck</th>
                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Source</th>
                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Medium</th>
                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Campaign</th>
@@ -1112,8 +1145,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </>
                             ) : (
                               <>
-                                <td className="py-3 px-4 text-[10px] text-modern-secondary border-b border-slate-100/65 font-mono">{lastLead?.src || '-'}</td>
-                                <td className="py-3 px-4 text-[10px] text-modern-secondary border-b border-slate-100/65 font-mono">{lastLead?.sck || '-'}</td>
                                 <td className="py-3 px-4 text-[10px] text-modern-secondary border-b border-slate-100/65 font-mono">{lastLead?.utm_source || '-'}</td>
                                 <td className="py-3 px-4 text-[10px] text-modern-secondary border-b border-slate-100/65 font-mono">{lastLead?.utm_medium || '-'}</td>
                                 <td className="py-3 px-4 text-[10px] text-modern-secondary border-b border-slate-100/65 font-mono">{lastLead?.utm_campaign || '-'}</td>
@@ -1124,7 +1155,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       })
                     ) : (
                       <tr>
-                        <td colSpan={dashShowUtms ? 9 : 6} className="py-12 text-center text-xs font-bold text-modern-secondary uppercase tracking-widest whitespace-nowrap">
+                        <td colSpan={dashShowUtms ? 7 : 6} className="py-12 text-center text-xs font-bold text-modern-secondary uppercase tracking-widest whitespace-nowrap">
                           Nenhuma venda encontrada para os filtros atuais
                         </td>
                       </tr>

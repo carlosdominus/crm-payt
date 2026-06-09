@@ -536,6 +536,15 @@ export default function App() {
     const manualTag = clientTags[client.key];
     if (manualTag) return manualTag;
 
+    // 1.1 Support tag from clientExtraData if present (potential legacy location)
+    const extraTag = clientExtraData[client.key]?.tag;
+    if (extraTag) {
+      let t = extraTag;
+      if (t === 'feito' || t === 'contato enviado') t = 'vendido';
+      if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
+      return t as ClientTag;
+    }
+
     // 2. Automatic 'Vendido' detection (ONLY if they have MANUAL sales recorded)
     // This ensures that approved leads from the spreadsheet still show "Enviar Msg"
     // until a manual interaction/sale is logged.
@@ -1214,8 +1223,12 @@ export default function App() {
     }
 
     try {
-      const docRef = doc(collection(db, `users/${effectiveWorkspaceId}/manualFollowups`));
-      await setDoc(docRef, newFollowup);
+      const followupId = doc(collection(db, 'placeholder')).id;
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, followupId);
+      await setDoc(docRef, {
+        id: followupId,
+        ...newFollowup
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups`);
     }
@@ -1313,33 +1326,25 @@ export default function App() {
       
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        // Fallback for legacy names and standardization
         let t = data.tag;
         if (t === 'feito' || t === 'contato enviado') t = 'vendido';
         if (t === 'entrar em contato' || t === 'pendente') t = 'reloginho';
         
-        dbTags[data.clientKey] = t;
-        if (data.updatedAt) timestamps[data.clientKey] = data.updatedAt;
+        const key = data.clientKey || doc.id;
+        dbTags[key] = t;
+        if (data.updatedAt) timestamps[key] = data.updatedAt;
       });
       
       setClientTags(prev => {
-        const newTags = { ...prev };
-        // First, incorporate all tags found in clientExtraData (potential legacy location)
-        (Object.entries(clientExtraData) as [string, { tag?: string }][]).forEach(([key, data]) => {
-          if (data.tag && !newTags[key]) {
-            newTags[key] = data.tag;
-          }
-        });
-        // Then override with authoritative data from 'tags' collection
-        return { ...newTags, ...dbTags };
+        return { ...prev, ...dbTags };
       });
-      setTagTimestamps(timestamps);
+      setTagTimestamps(prev => ({ ...prev, ...timestamps }));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/tags`);
     });
 
     return () => unsubscribe();
-  }, [authReady, user, effectiveWorkspaceId, clientExtraData]);
+  }, [authReady, user, effectiveWorkspaceId]);
 
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
