@@ -15,6 +15,16 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isPartner(ownerId) {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/partnerships/$(ownerId + "_" + request.auth.uid))
+      );
+    }
+
+    function isOwnerOrPartner(userId) {
+      return isOwner(userId) || isPartner(userId);
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -29,45 +39,43 @@ service cloud.firestore {
 
     // --- User Tags ---
     match /users/{userId}/tags/{clientKey} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId) 
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId) 
         && isValidId(clientKey)
         && isValidUserTag(incoming())
         && incoming().clientKey == clientKey;
-      allow update: if isOwner(userId)
+      allow update: if isOwnerOrPartner(userId)
         && isValidUserTag(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['tag', 'updatedAt'])
         && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
+      allow delete: if isOwnerOrPartner(userId);
 
       function isValidUserTag(data) {
         return data.keys().hasAll(['clientKey', 'tag', 'updatedAt'])
           && data.keys().size() == 3
           && data.clientKey is string && data.clientKey.size() <= 128
-          && data.tag in ['pendente', 'vendido', 'lixo']
+          && data.tag is string && data.tag.size() <= 128
           && data.updatedAt is string;
       }
     }
 
     // --- Manual Sales ---
     match /users/{userId}/sales/{saleId} {
-      allow get: if isOwner(userId);
-      allow list: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId)
         && isValidId(saleId)
         && isValidManualSale(incoming())
         && incoming().id == saleId;
-      allow update: if isOwner(userId)
+      allow update: if isOwnerOrPartner(userId)
         && isValidManualSale(incoming())
-        && incoming().diff(existing()).affectedKeys().hasOnly(['productName', 'value', 'commission', 'date', 'timestamp'])
+        && incoming().diff(existing()).affectedKeys().hasOnly(['category', 'productName', 'value', 'commission', 'date', 'timestamp', 'time'])
         && incoming().id == existing().id
         && incoming().clientKey == existing().clientKey;
-      allow delete: if isOwner(userId);
+      allow delete: if isOwnerOrPartner(userId);
 
       function isValidManualSale(data) {
         return data.keys().hasAll(['id', 'clientKey', 'productName', 'value', 'commission', 'date', 'timestamp'])
-          && (data.keys().size() == 7 || (data.keys().size() == 8 && data.keys().hasAll(['createdAt'])))
+          && data.keys().size() <= 10
           && data.id is string && data.id.size() <= 128
           && data.clientKey is string && data.clientKey.size() <= 128
           && data.productName is string && data.productName.size() <= 200
@@ -76,6 +84,124 @@ service cloud.firestore {
           && data.date is string
           && data.timestamp is number;
       }
+    }
+
+    // --- WhatsApp Accounts ---
+    match /users/{userId}/whatsappAccounts/{accId} {
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId)
+        && isValidId(accId)
+        && isValidWhatsAppAccount(incoming())
+        && incoming().id == accId;
+      allow update: if isOwnerOrPartner(userId)
+        && isValidWhatsAppAccount(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isOwnerOrPartner(userId);
+
+      function isValidWhatsAppAccount(data) {
+        return data.keys().hasAll(['id', 'name', 'phoneNumber', 'identifier', 'color'])
+          && data.keys().size() <= 8
+          && data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 200
+          && data.phoneNumber is string && data.phoneNumber.size() <= 60
+          && data.identifier is string && data.identifier.size() <= 128
+          && data.color is string && data.color.size() <= 20;
+      }
+    }
+
+    // --- Client Extra Data (clientData) ---
+    match /users/{userId}/clientData/{clientKey} {
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId)
+        && isValidId(clientKey)
+        && isValidClientData(incoming())
+        && incoming().clientKey == clientKey;
+      allow update: if isOwnerOrPartner(userId)
+        && isValidClientData(incoming())
+        && incoming().clientKey == existing().clientKey;
+      allow delete: if isOwnerOrPartner(userId);
+
+      function isValidClientData(data) {
+        return data.keys().hasAll(['clientKey', 'updatedAt'])
+          && data.keys().size() <= 8
+          && data.clientKey is string && data.clientKey.size() <= 128
+          && data.updatedAt is string;
+      }
+    }
+
+    // --- Manual Follow-ups (manualFollowups) ---
+    match /users/{userId}/manualFollowups/{followupId} {
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId)
+        && isValidId(followupId)
+        && isValidFollowup(incoming())
+        && incoming().id == followupId;
+      allow update: if isOwnerOrPartner(userId)
+        && isValidFollowup(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isOwnerOrPartner(userId);
+
+      function isValidFollowup(data) {
+        return data.keys().hasAll(['id', 'clientKey', 'nome', 'telefone', 'zap', 'date', 'status', 'createdAt'])
+          && data.keys().size() == 8
+          && data.id is string && data.id.size() <= 128
+          && data.clientKey is string && data.clientKey.size() <= 128
+          && data.nome is string && data.nome.size() <= 200
+          && data.telefone is string && data.telefone.size() <= 60
+          && data.zap is string && data.zap.size() <= 1000
+          && data.date is string && data.date.size() <= 20
+          && data.status in ['pending', 'sent']
+          && data.createdAt is string;
+      }
+    }
+
+    // --- Interaction Logs / History ---
+    match /users/{userId}/history/{logId} {
+      allow read: if isOwnerOrPartner(userId);
+      allow create: if isOwnerOrPartner(userId)
+        && isValidId(logId)
+        && isValidHistoryLog(incoming());
+      allow update: if false; // Logs are immutable
+      allow delete: if isOwnerOrPartner(userId);
+
+      function isValidHistoryLog(data) {
+        return data.keys().hasAll(['clientKey', 'type', 'content', 'timestamp'])
+          && data.keys().size() == 4
+          && data.clientKey is string && data.clientKey.size() <= 128
+          && data.type is string && data.type.size() <= 100
+          && data.content is string && data.content.size() <= 1000
+          && data.timestamp is string;
+      }
+    }
+
+    // --- Workspace Management ---
+    match /workspaceConfig/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /workspaceKeys/{key} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /domainWorkspaces/{domain} {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /partnerships/{partnershipId} {
+      // Allows owner or partner to manage the connection
+      allow read: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.partnerUid == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.partnerUid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || resource.data.partnerUid == request.auth.uid);
+    }
+
+    match /invites/{inviteId} {
+      allow read: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || (request.auth.token.email != null && request.auth.token.email.lower() == resource.data.inviteeEmail.lower()));
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
     }
   }
 }
