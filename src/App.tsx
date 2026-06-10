@@ -81,15 +81,79 @@ import {
 
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1DhS7ewyAV6lBR6fag_OwzP4G_WrSUhncq42cROLU_X0/export?format=csv";
 
-const MANUAL_PRODUCTS = [
-  { name: "Vpower - 1 Pote", fixedCommission: 46.54 },
-  { name: "Vpower - 3 Potes", fixedCommission: 94.05 },
-  { name: "Vpower - 6 Potes", fixedCommission: 141.55 },
-  { name: "Protocolo Força Natural", type: 'front', commissionRate: 0.5 },
-  { name: "Diagnóstico Personalizado", type: 'upsell', commissionRate: 0.5 },
-  { name: "Bônus Especial", type: 'upsell', commissionRate: 0.5 },
-  { name: "Tônico do Cavalo", type: 'upsell', commissionRate: 0.5 },
+export const INFO_PRODUCTS = [
+  { name: "Protocolo Força Natural", commissionRate: 0.5 },
+  { name: "Diagnóstico Personalizado", commissionRate: 0.5 },
+  { name: "Bônus Especial", commissionRate: 0.5 },
+  { name: "Tônico do Cavalo", commissionRate: 0.5 },
+  { name: "Meu ProstaApp", commissionRate: 0.5 },
 ];
+
+export const NUTRA_PRODUCTS = [
+  { name: "Vpower 1 pote", commissionRate: 0.23 },
+  { name: "Vpower 3 potes", commissionRate: 0.25 },
+  { name: "Vpower 6 potes", commissionRate: 0.25 },
+];
+
+const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
+
+export const getManualSaleCommission = (productName: string, value: number): number => {
+  const name = productName.toLowerCase().trim();
+  
+  if (
+    name.includes("protocolo") || 
+    name.includes("força natural") || 
+    name.includes("forca natural")
+  ) {
+    return value * 0.5;
+  }
+  if (
+    name.includes("diagnóstico") || 
+    name.includes("diagnostico") || 
+    name.includes("personalizado")
+  ) {
+    return value * 0.5;
+  }
+  if (
+    name.includes("bônus") || 
+    name.includes("bonus") || 
+    name.includes("especial")
+  ) {
+    return value * 0.5;
+  }
+  if (
+    name.includes("tônico") || 
+    name.includes("tonico") || 
+    name.includes("cavalo")
+  ) {
+    return value * 0.5;
+  }
+  if (
+    name.includes("prostaapp") || 
+    name.includes("prosta app") || 
+    name.includes("meu prosta")
+  ) {
+    return value * 0.5;
+  }
+  
+  if (name.includes("vpower")) {
+    if (name.includes("1") || name.includes("um") || name.includes("one")) {
+      return value * 0.23;
+    }
+    if (name.includes("3") || name.includes("três") || name.includes("tres") || name.includes("three")) {
+      return value * 0.25;
+    }
+    if (name.includes("6") || name.includes("seis") || name.includes("six")) {
+      return value * 0.25;
+    }
+  }
+  
+  if (name.includes("1 pote")) return value * 0.23;
+  if (name.includes("3 potes")) return value * 0.25;
+  if (name.includes("6 potes")) return value * 0.25;
+
+  return value * 0.5; // default for unknown/other info products
+};
 
 const PAYMENT_METHODS: Record<string, string> = {
   "0": "Nenhum",
@@ -656,6 +720,30 @@ export default function App() {
     return () => unsub();
   }, [user, activePartnerKey]);
 
+  // 2.5 Auto-provision partnership record for Domain Discovery colleagues to pass Security Rules
+  useEffect(() => {
+    if (!user || !domainWorkspaceData) return;
+    
+    const autoRegisterPartnership = async () => {
+      try {
+        const partnershipId = `${domainWorkspaceData.ownerUid}_${user.uid}`;
+        await setDoc(doc(db, 'partnerships', partnershipId), {
+          ownerUid: domainWorkspaceData.ownerUid,
+          ownerEmail: domainWorkspaceData.ownerEmail,
+          partnerUid: user.uid,
+          partnerEmail: user.email,
+          keyUsed: domainWorkspaceData.key,
+          connectedAt: new Date().toISOString()
+        }, { merge: true });
+        console.log("Auto-provisioned partnership record for domain auto-match:", partnershipId);
+      } catch (err) {
+        console.error("Failed to auto-provision partnership for security rules:", err);
+      }
+    };
+
+    autoRegisterPartnership();
+  }, [user, domainWorkspaceData]);
+
   // 3. Determine Effective Workspace
   useEffect(() => {
     if (!user) return;
@@ -910,14 +998,29 @@ export default function App() {
     if (!authReady || !effectiveWorkspaceId) {
       if (!user && authReady) {
         const saved = localStorage.getItem('crm_manual_sales');
-        setManualSales(saved ? JSON.parse(saved) : []);
+        if (saved) {
+          const parsed = JSON.parse(saved) as ManualSale[];
+          const recalculated = parsed.map(s => ({
+            ...s,
+            commission: getManualSaleCommission(s.productName, s.value)
+          }));
+          setManualSales(recalculated);
+        } else {
+          setManualSales([]);
+        }
       }
       return;
     }
 
     const q = query(collection(db, `users/${effectiveWorkspaceId}/sales`), orderBy('timestamp', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const sales = snapshot.docs.map(doc => doc.data() as ManualSale);
+      const sales = snapshot.docs.map(doc => {
+        const data = doc.data() as ManualSale;
+        return {
+          ...data,
+          commission: getManualSaleCommission(data.productName, data.value)
+        };
+      });
       setManualSales(sales);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/sales`);
@@ -929,7 +1032,8 @@ export default function App() {
   const [showAddSaleModal, setShowAddSaleModal] = useState(false);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [saleForm, setSaleForm] = useState({
-    productIndex: 0,
+    category: 'info' as 'info' | 'nutra',
+    productName: "Protocolo Força Natural",
     value: "",
     date: format(new Date(), 'yyyy-MM-dd'),
     time: format(new Date(), 'HH:mm')
@@ -1461,9 +1565,8 @@ export default function App() {
   const handleAddSale = async () => {
     if (!selectedClient || !saleForm.value) return;
 
-    const product = MANUAL_PRODUCTS[saleForm.productIndex] as any;
     const value = parseFloat(saleForm.value.replace(',', '.'));
-    const commission = product.fixedCommission !== undefined ? product.fixedCommission : value * (product.commissionRate || 0);
+    const commission = getManualSaleCommission(saleForm.productName, value);
     
     const saleId = editingSaleId || Math.random().toString(36).substr(2, 9);
     
@@ -1474,7 +1577,7 @@ export default function App() {
     const newSale: ManualSale = {
       id: saleId,
       clientKey: selectedClient.key,
-      productName: product.name,
+      productName: saleForm.productName,
       value,
       commission,
       date: saleForm.date, // keeping for backward compatibility
@@ -1490,7 +1593,8 @@ export default function App() {
       setShowAddSaleModal(false);
       setEditingSaleId(null);
       setSaleForm({
-        productIndex: 0,
+        category: 'info' as 'info' | 'nutra',
+        productName: "Protocolo Força Natural",
         value: "",
         date: format(new Date(), 'yyyy-MM-dd'),
         time: format(new Date(), 'HH:mm')
@@ -1509,7 +1613,8 @@ export default function App() {
     setShowAddSaleModal(false);
     setEditingSaleId(null);
     setSaleForm({
-      productIndex: 0,
+      category: 'info' as 'info' | 'nutra',
+      productName: "Protocolo Força Natural",
       value: "",
       date: format(new Date(), 'yyyy-MM-dd'),
       time: format(new Date(), 'HH:mm')
@@ -1549,8 +1654,7 @@ export default function App() {
     setSelectedClient(client);
     setEditingSaleId(sale.id);
     
-    // Find product index
-    const pIndex = MANUAL_PRODUCTS.findIndex(p => p.name === sale.productName);
+    const isNutra = sale.productName.toLowerCase().includes("vpower") || sale.productName.toLowerCase().includes("pote");
     
     // Attempt to extract time from timestamp if it's reasonably new
     const dateObj = new Date(sale.timestamp);
@@ -1558,7 +1662,8 @@ export default function App() {
     const dateStr = format(dateObj, 'yyyy-MM-dd');
 
     setSaleForm({
-      productIndex: pIndex !== -1 ? pIndex : 0,
+      category: isNutra ? 'nutra' : 'info',
+      productName: sale.productName,
       value: sale.value.toString().replace('.', ','),
       date: dateStr,
       time: timeStr
@@ -4489,11 +4594,11 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white shadow-2xl z-[70] p-8 rounded-none border border-modern-border"
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white shadow-2xl z-[70] p-8 rounded-2xl border border-modern-border"
             >
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-100 flex items-center justify-center text-emerald-600">
+                  <div className="w-10 h-10 bg-emerald-100 flex items-center justify-center text-emerald-600 rounded-xl">
                     <DollarSign size={20} />
                   </div>
                   <div>
@@ -4510,73 +4615,110 @@ export default function App() {
 
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Produto Vendido</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Categoria</label>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSaleForm({ 
+                        ...saleForm, 
+                        category: 'info', 
+                        productName: 'Protocolo Força Natural' 
+                      })}
+                      className={`py-2 text-[10px] font-black uppercase tracking-wider border rounded-lg transition-all ${
+                        saleForm.category === 'info'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-modern-secondary border-modern-border hover:bg-slate-100'
+                      }`}
+                    >
+                      Info Produto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaleForm({ 
+                        ...saleForm, 
+                        category: 'nutra', 
+                        productName: 'Vpower 1 pote' 
+                      })}
+                      className={`py-2 text-[10px] font-black uppercase tracking-wider border rounded-lg transition-all ${
+                        saleForm.category === 'nutra'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-modern-secondary border-modern-border hover:bg-slate-100'
+                      }`}
+                    >
+                      Nutra
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Produto Vendido</label>
                   <select 
-                    value={saleForm.productIndex}
-                    onChange={(e) => setSaleForm({ ...saleForm, productIndex: parseInt(e.target.value) })}
-                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    value={saleForm.productName}
+                    onChange={(e) => setSaleForm({ ...saleForm, productName: e.target.value })}
+                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all cursor-pointer"
                   >
-                    {MANUAL_PRODUCTS.map((p: any, i) => (
-                      <option key={i} value={i}>{p.name} ({p.fixedCommission !== undefined ? `R$ ${p.fixedCommission.toFixed(2)}` : `${(p.commissionRate || 0) * 100}%`})</option>
+                    {(saleForm.category === 'info' ? INFO_PRODUCTS : NUTRA_PRODUCTS).map((p, i) => (
+                      <option key={i} value={p.name}>
+                        {p.name} ({`${(p.commissionRate || 0) * 100}%`})
+                      </option>
                     ))}
                   </select>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Valor da Venda (R$)</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Valor da Venda (R$)</label>
                   <input 
                     type="text" 
                     value={saleForm.value}
                     onChange={(e) => setSaleForm({ ...saleForm, value: e.target.value })}
                     placeholder="Ex: 97,00"
-                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                    className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Data da Venda</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Data da Venda</label>
                     <input 
                       type="date" 
                       value={saleForm.date}
                       onChange={(e) => setSaleForm({ ...saleForm, date: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all cursor-pointer"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Horário</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Horário</label>
                     <input 
                       type="time" 
                       value={saleForm.time}
                       onChange={(e) => setSaleForm({ ...saleForm, time: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-none text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                      className="w-full px-4 py-3 bg-slate-50 border border-modern-border rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all cursor-pointer"
                     />
                   </div>
                 </div>
 
                 <div className="pt-4">
-                  <div className="bg-emerald-50 p-4 border border-emerald-100 mb-6">
+                  <div className="bg-emerald-50 p-4 border border-emerald-100 rounded-xl mb-6">
                     <div className="flex justify-between items-center">
                       <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Sua Comissão Estimada:</p>
                       <p className="text-lg font-extrabold text-emerald-600">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                           (() => {
-                            const p = MANUAL_PRODUCTS[saleForm.productIndex] as any;
-                            if (p.fixedCommission !== undefined) return p.fixedCommission;
-                            return (parseFloat(saleForm.value.replace(',', '.')) || 0) * (p.commissionRate || 0);
+                            const valNum = parseFloat(saleForm.value.replace(',', '.')) || 0;
+                            return getManualSaleCommission(saleForm.productName, valNum);
                           })()
                         )}
                       </p>
                     </div>
                   </div>
 
-                    <button 
-                      onClick={handleAddSale}
-                      disabled={!saleForm.value}
-                      className="w-full bg-emerald-600 text-white py-4 font-bold text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <CheckCircle2 size={18} /> {editingSaleId ? "Salvar Alterações" : "Confirmar Venda"}
-                    </button>
+                  <button 
+                    onClick={handleAddSale}
+                    disabled={!saleForm.value}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 rounded-xl shadow-sm"
+                  >
+                    <CheckCircle2 size={18} /> {editingSaleId ? "Salvar Alterações" : "Confirmar Venda"}
+                  </button>
                 </div>
               </div>
             </motion.div>

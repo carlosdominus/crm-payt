@@ -522,16 +522,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
     
     const localMap = new Map<string, number>();
-    filteredClientsForDash.forEach(client => {
-      const loc = getBrazilLocalFromPhone(client.telefone);
-      localMap.set(loc, (localMap.get(loc) || 0) + 1);
+    // Use filteredSalesForDash (representing manual sales) to get DDD from matching clients
+    filteredSalesForDash.forEach(sale => {
+      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      if (client) {
+        const loc = getBrazilLocalFromPhone(client.telefone);
+        localMap.set(loc, (localMap.get(loc) || 0) + 1);
+      }
     });
     
     return Array.from(localMap.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8);
-  }, [filteredClientsForDash]);
+  }, [filteredSalesForDash, enrichedClients]);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 custom-scrollbar bg-slate-50/40">
@@ -751,6 +755,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </ResponsiveContainer>
                     ) : (
                       <div className="h-full flex items-center justify-center text-slate-400 text-xs">Sem comissões registradas</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* WhatsApp Sales Distribution */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Vendas por WhatsApp (Faturamento)</h3>
+                  <div className="h-[240px] w-full">
+                    {dashWhatsappSales.some(s => s.value > 0) ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={dashWhatsappSales} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+                          <XAxis type="number" tick={{ fontSize: 9 }} tickLine={false} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 9 }} width={110} tickLine={false} />
+                          <Tooltip formatter={(value: any) => [new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value), 'Faturamento']} />
+                          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                            {dashWhatsappSales.map((entry: any, index: number) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-slate-400 text-xs">Sem faturamento por WhatsApp registrado no período</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Vendas por WhatsApp (Volume/Quantidade)</h3>
+                  <div className="h-[240px] w-full">
+                    {dashWhatsappSales.some(s => s.count > 0) ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={dashWhatsappSales} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+                          <XAxis type="number" tick={{ fontSize: 9 }} tickLine={false} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 9 }} width={110} tickLine={false} />
+                          <Tooltip formatter={(value: any) => [value, 'Vendas']} />
+                          <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                            {dashWhatsappSales.map((entry: any, index: number) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-slate-400 text-xs">Sem vendas por WhatsApp registradas no período</div>
                     )}
                   </div>
                 </div>
@@ -1025,19 +1076,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* Map DDD layout */}
                 <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Distribuição por DDD / Local no Brasil</h3>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Distribuição por DDD / Local (Apenas Vendas Manuais)</h3>
                   <div className="h-[225px] w-full">
                     {dashLocationDistribution.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={dashLocationDistribution}>
                           <XAxis dataKey="name" tick={{ fontSize: 8 }} interval={0} tickLine={false} />
                           <YAxis tick={{ fontSize: 9 }} tickLine={false} />
-                          <Tooltip formatter={(value: any) => [value, 'Clientes']} />
+                          <Tooltip formatter={(value: any) => [value, 'Vendas']} />
                           <Bar dataKey="value" fill="#ec4899" radius={[4, 4, 0, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="text-slate-400 text-xs flex items-center justify-center h-full">DDD não identificado nas linhas</div>
+                      <div className="text-slate-400 text-xs flex items-center justify-center h-full">Nenhuma venda manual com DDD identificado no período</div>
                     )}
                   </div>
                 </div>
