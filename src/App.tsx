@@ -1217,24 +1217,38 @@ export default function App() {
 
   const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string; nome?: string; email?: string; telefone?: string }) => {
     try {
+      const client = clients.find(c => c.key === clientKey);
       const currentData = clientExtraData[clientKey] || {};
-      const newData = {
+      const rawNewData = {
         clientKey,
+        nome: updates.nome !== undefined ? updates.nome : (currentData.nome || client?.nome || ""),
+        email: updates.email !== undefined ? updates.email : (currentData.email || client?.email || ""),
+        telefone: updates.telefone !== undefined ? updates.telefone : (currentData.telefone || client?.telefone || ""),
+        trackingCode: updates.trackingCode !== undefined ? updates.trackingCode : (currentData.trackingCode || ""),
+        assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : (currentData.assignedWhatsappId || ""),
         ...currentData,
         ...updates,
         updatedAt: new Date().toISOString()
       };
 
+      // Strip out any undefined or null values to be safe for Firestore
+      const cleanData: Record<string, any> = {};
+      Object.entries(rawNewData).forEach(([key, val]) => {
+        if (val !== undefined && val !== null) {
+          cleanData[key] = val;
+        }
+      });
+
       // Local update for immediate feedback
       setClientExtraData(prev => ({
         ...prev,
-        [clientKey]: newData
+        [clientKey]: cleanData
       }));
 
       if (!user) return;
 
       const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
-      await setDoc(docRef, newData, { merge: true });
+      await setDoc(docRef, cleanData, { merge: true });
 
       if (updates.trackingCode) {
         addInteractionLog(clientKey, 'tracking_code', `Código de rastreio atualizado: ${updates.trackingCode}`);
@@ -1242,7 +1256,6 @@ export default function App() {
 
       // Sync with Google Sheets if URL is configured (Column K: Ações, Column W: ZAP)
       if (sheetSyncUrl) {
-        const client = clients.find(c => c.key === clientKey);
         const rowNumber = client?.leads?.[0]?.rowNumber;
         
         if (rowNumber) {
@@ -1262,14 +1275,14 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               rowNumber,
-              trackingCode: updates.trackingCode !== undefined ? updates.trackingCode : currentData.trackingCode,
-              assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : currentData.assignedWhatsappId,
+              trackingCode: updates.trackingCode !== undefined ? updates.trackingCode : (currentData.trackingCode || ""),
+              assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : (currentData.assignedWhatsappId || ""),
               assignedWhatsappName: assignedAccName,
               tag: currentTagText,
               zap: assignedAccName,
-              nome: updates.nome !== undefined ? updates.nome : (currentData.nome || ""),
-              email: updates.email !== undefined ? updates.email : (currentData.email || ""),
-              telefone: updates.telefone !== undefined ? updates.telefone : (currentData.telefone || "")
+              nome: updates.nome !== undefined ? updates.nome : (currentData.nome || client?.nome || ""),
+              email: updates.email !== undefined ? updates.email : (currentData.email || client?.email || ""),
+              telefone: updates.telefone !== undefined ? updates.telefone : (currentData.telefone || client?.telefone || "")
             })
           }).catch(err => console.error("Sync error:", err));
         }
@@ -1381,12 +1394,7 @@ export default function App() {
     }
   };
 
-  const markManualFollowupSent = async (followupId: string, clientKey: string, telefone: string) => {
-    const cleanNum = telefone.replace(/\D/g, '');
-    const msg = `Olá!`;
-    const url = `https://wa.me/${cleanNum}?text=${encodeURIComponent(msg)}`;
-    window.open(url, '_blank');
-
+  const markManualFollowupSent = async (followupId: string, clientKey: string) => {
     if (!user || !effectiveWorkspaceId) {
       const saved = localStorage.getItem('crm_manual_followups');
       const parsed = saved ? JSON.parse(saved) : [];
@@ -3503,14 +3511,14 @@ export default function App() {
                                   <div className="flex items-center justify-center gap-1.5">
                                     {f.status === 'pending' ? (
                                       <button
-                                        onClick={() => markManualFollowupSent(f.id, f.clientKey, f.telefone)}
+                                        onClick={() => markManualFollowupSent(f.id, f.clientKey)}
                                         className="px-2.5 py-1 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider rounded shadow-sm hover:bg-emerald-700 transition-all shrink-0"
                                       >
-                                        Chamar & Concluir
+                                        Concluir
                                       </button>
                                     ) : (
                                       <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-2 py-1 rounded uppercase tracking-wider border border-emerald-200">
-                                        Mensagem Enviada
+                                        Concluído
                                       </span>
                                     )}
                                     <button

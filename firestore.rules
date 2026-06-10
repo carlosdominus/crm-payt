@@ -123,12 +123,15 @@ service cloud.firestore {
 
       function isValidClientData(data) {
         return data.keys().hasAll(['clientKey', 'updatedAt'])
-          && data.keys().size() <= 12
+          && data.keys().size() <= 20
           && data.clientKey is string && data.clientKey.size() <= 128
           && data.updatedAt is string
           && data.get('nome', '') is string && data.get('nome', '').size() <= 200
           && data.get('email', '') is string && data.get('email', '').size() <= 200
-          && data.get('telefone', '') is string && data.get('telefone', '').size() <= 60;
+          && data.get('telefone', '') is string && data.get('telefone', '').size() <= 60
+          && data.get('assignedWhatsappId', '') is string && data.get('assignedWhatsappId', '').size() <= 128
+          && data.get('trackingCode', '') is string && data.get('trackingCode', '').size() <= 200
+          && data.get('paymentStatus', '') is string && data.get('paymentStatus', '').size() <= 128;
       }
     }
 
