@@ -1498,15 +1498,24 @@ export default function App() {
   const toggleTag = async (clientKey: string, tag: ClientTag) => {
     if (!effectiveWorkspaceId) return;
     
-    // Always set to the clicked tag (never toggles to null as requested: "NUNCA pode sair, a não ser quando eu quiser mudar")
-    const resolvedNewTag: ClientTag = tag;
+    const client = clients.find(c => c.key === clientKey);
+    const existingTag = client ? getClientTag(client) : clientTags[clientKey];
+    
+    const isRemove = existingTag === tag;
+    const resolvedNewTag: ClientTag | null = isRemove ? null : tag;
     
     setClientTags(prev => ({ ...prev, [clientKey]: resolvedNewTag }));
 
     // Always persist to localStorage as cache/fallback
     const saved = localStorage.getItem('crm_client_tags');
     const parsed = saved ? JSON.parse(saved) : {};
-    const updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
+    let updatedTags;
+    if (isRemove) {
+      updatedTags = { ...parsed };
+      delete updatedTags[clientKey];
+    } else {
+      updatedTags = { ...parsed, [clientKey]: resolvedNewTag };
+    }
     localStorage.setItem('crm_client_tags', JSON.stringify(updatedTags));
 
     const now = new Date().toISOString();
@@ -1515,13 +1524,23 @@ export default function App() {
       try {
         const cleanClientKey = clientKey.replace(/\//g, '-');
         const tagRef = doc(db, `users/${effectiveWorkspaceId}/tags`, cleanClientKey);
-        await setDoc(tagRef, {
-          clientKey,
-          tag: resolvedNewTag,
-          updatedAt: now
-        }, { merge: true });
-        setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
-        addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${resolvedNewTag}`);
+        if (isRemove) {
+          await deleteDoc(tagRef);
+          setTagTimestamps(prev => {
+            const next = { ...prev };
+            delete next[clientKey];
+            return next;
+          });
+          addInteractionLog(clientKey, 'tag_change', `Tag removida.`);
+        } else {
+          await setDoc(tagRef, {
+            clientKey,
+            tag: resolvedNewTag,
+            updatedAt: now
+          }, { merge: true });
+          setTagTimestamps(prev => ({ ...prev, [clientKey]: now }));
+          addInteractionLog(clientKey, 'tag_change', `Tag alterada para: ${resolvedNewTag}`);
+        }
       } catch (error) {
         console.error("Firestore tag write failed (using offline fallback):", error);
         // Do NOT revert! Let the tag stay in local state and localStorage cache.
@@ -4170,23 +4189,23 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-50 overflow-y-auto custom-scrollbar flex flex-col"
+              className="fixed right-0 top-0 md:top-4 md:bottom-4 md:right-4 h-full md:h-[calc(100vh-2rem)] w-full max-w-xl bg-white md:rounded-3xl shadow-2xl border-l md:border border-slate-100 z-50 overflow-y-auto custom-scrollbar flex flex-col"
             >
-              <div className="p-10">
-                <div className="flex items-center justify-between mb-12">
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
                   <button 
                     onClick={() => setSelectedClient(null)}
-                    className="w-12 h-12 bg-slate-100 rounded-none flex items-center justify-center text-modern-secondary hover:text-modern-text transition-colors"
+                    className="w-10 h-10 bg-slate-50 border border-modern-border hover:bg-slate-100 rounded-xl flex items-center justify-center text-modern-secondary hover:text-modern-text transition-all"
                   >
-                    <X size={24} />
+                    <X size={20} />
                   </button>
                   <div className="text-right">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary">Última Atividade</p>
+                    <p className="text-[10px] font-black uppercase tracking-wider text-modern-secondary">Última Atividade</p>
                     <p className="text-xs font-bold text-modern-text">{currentSelectedClient.lastPurchaseDate}</p>
                   </div>
                 </div>
 
-                <div className="mb-12">
+                <div className="mb-10">
                   {isEditingClientDetails ? (
                     <div className="space-y-4 p-5 bg-slate-50 border border-modern-border rounded-xl mb-6">
                       <h3 className="text-xs font-black uppercase tracking-wider text-modern-text">Editar Informações do Cliente</h3>
@@ -4258,7 +4277,7 @@ export default function App() {
                   ) : (
                     <>
                       <div className="flex items-center gap-2 mb-3">
-                        <h2 className="text-4xl font-extrabold tracking-tight text-modern-text leading-tight">{currentSelectedClient.nome}</h2>
+                        <h2 className="text-3xl font-black tracking-tight text-modern-text leading-tight">{currentSelectedClient.nome}</h2>
                         <button
                           onClick={() => {
                             setEditClientName(currentSelectedClient.nome || "");
@@ -4272,18 +4291,18 @@ export default function App() {
                           <Edit size={16} />
                         </button>
                       </div>
-                      <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary mb-6">
-                        <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><AtSign size={14} /> {currentSelectedClient.email}</p>
-                        <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Phone size={14} /> {currentSelectedClient.telefone}</p>
+                      <div className="flex flex-wrap gap-3 text-xs font-bold text-modern-secondary mb-6">
+                        <p className="flex items-center gap-2 bg-slate-50/50 px-3 py-1.5 rounded-xl border border-modern-border/60"><AtSign size={14} /> {currentSelectedClient.email}</p>
+                        <p className="flex items-center gap-2 bg-slate-50/50 px-3 py-1.5 rounded-xl border border-modern-border/60"><Phone size={14} /> {currentSelectedClient.telefone}</p>
                       </div>
                     </>
                   )}
                   
-                  <div className="space-y-4">
+                  <div className="space-y-3.5">
                     {/* Checkout Link */}
                     {currentSelectedClient.leads?.[0]?.checkoutUrl && (
-                      <div className="flex items-center gap-3 bg-[#DBEAFE]/30 p-4 border border-blue-100">
-                        <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white shrink-0">
+                      <div className="flex items-center gap-3 bg-blue-50/40 p-4 border border-blue-100/80 rounded-xl">
+                        <div className="w-8 h-8 bg-blue-600 flex items-center justify-center text-white shrink-0 rounded-lg">
                           <ExternalLink size={16} />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -4292,7 +4311,7 @@ export default function App() {
                         </div>
                         <button 
                           onClick={() => copyToClipboard(currentSelectedClient.leads![0].checkoutUrl!)}
-                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 text-[10px] font-black uppercase hover:bg-blue-50 transition-all shadow-sm flex items-center gap-1"
+                          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 text-[10px] font-black uppercase hover:bg-blue-50 transition-all shadow-sm flex items-center gap-1 rounded-lg"
                         >
                           <Copy size={12} /> Copiar
                         </button>
@@ -4300,8 +4319,8 @@ export default function App() {
                     )}
 
                     {/* Tracking Code */}
-                    <div className="flex items-center gap-3 bg-slate-50 p-4 border border-modern-border">
-                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0">
+                    <div className="flex items-center gap-3 bg-slate-50/50 p-4 border border-modern-border/60 rounded-xl">
+                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0 rounded-lg">
                         <Package size={16} />
                       </div>
                       <div className="flex-1">
@@ -4317,8 +4336,8 @@ export default function App() {
                     </div>
 
                     {/* Payment Status */}
-                    <div className="flex items-center gap-3 bg-slate-50 p-4 border border-modern-border">
-                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0">
+                    <div className="flex items-center gap-3 bg-slate-50/50 p-4 border border-modern-border/60 rounded-xl">
+                      <div className="w-8 h-8 bg-modern-text flex items-center justify-center text-white shrink-0 rounded-lg">
                         <DollarSign size={16} />
                       </div>
                       <div className="flex-1">
@@ -4335,7 +4354,7 @@ export default function App() {
                                 updatePaymentStatus(currentSelectedClient.key, paymentStatuses[currentSelectedClient.key]?.status === ps.id ? null : ps.id as any);
                               }}
                               className={cn(
-                                "flex-1 px-3 py-2 text-[10px] font-black uppercase transition-all border",
+                                "flex-1 px-3 py-2 text-[10px] font-black uppercase transition-all border rounded-lg",
                                 paymentStatuses[currentSelectedClient.key]?.status === ps.id
                                   ? `bg-${ps.color}-600 border-${ps.color}-700 text-white shadow-sm`
                                   : `bg-white border-slate-200 text-slate-400 hover:border-${ps.color}-300 hover:bg-slate-50`
