@@ -1076,7 +1076,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* Map DDD layout */}
                 <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Distribuição por DDD / Local (Apenas Vendas Manuais)</h3>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text mb-4">Distribuição por DDD / Local no Brasil (Apenas Vendas Manuais)</h3>
                   <div className="h-[225px] w-full">
                     {dashLocationDistribution.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">

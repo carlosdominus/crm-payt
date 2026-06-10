@@ -123,9 +123,12 @@ service cloud.firestore {
 
       function isValidClientData(data) {
         return data.keys().hasAll(['clientKey', 'updatedAt'])
-          && data.keys().size() <= 8
+          && data.keys().size() <= 12
           && data.clientKey is string && data.clientKey.size() <= 128
-          && data.updatedAt is string;
+          && data.updatedAt is string
+          && (!data.keys().contains('nome') || (data.nome is string && data.nome.size() <= 200))
+          && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 200))
+          && (!data.keys().contains('telefone') || (data.telefone is string && data.telefone.size() <= 60));
       }
     }
 
@@ -143,7 +146,7 @@ service cloud.firestore {
 
       function isValidFollowup(data) {
         return data.keys().hasAll(['id', 'clientKey', 'nome', 'telefone', 'zap', 'date', 'status', 'createdAt'])
-          && data.keys().size() == 8
+          && data.keys().size() <= 9
           && data.id is string && data.id.size() <= 128
           && data.clientKey is string && data.clientKey.size() <= 128
           && data.nome is string && data.nome.size() <= 200
@@ -151,7 +154,8 @@ service cloud.firestore {
           && data.zap is string && data.zap.size() <= 1000
           && data.date is string && data.date.size() <= 20
           && data.status in ['pending', 'sent']
-          && data.createdAt is string;
+          && data.createdAt is string
+          && (!data.keys().contains('observacao') || (data.observacao is string && data.observacao.size() <= 1000));
       }
     }
 

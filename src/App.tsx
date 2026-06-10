@@ -582,9 +582,20 @@ export default function App() {
   const [manualSearchQuery, setManualSearchQuery] = useState("");
   const [selectedManualClient, setSelectedManualClient] = useState<any | null>(null);
   const [manualFollowupDate, setManualFollowupDate] = useState("");
+  const [manualFollowupObservacao, setManualFollowupObservacao] = useState("");
+  const [editingFollowupId, setEditingFollowupId] = useState<string | null>(null);
+  const [editingFollowupDate, setEditingFollowupDate] = useState("");
+  const [editingFollowupObservacao, setEditingFollowupObservacao] = useState("");
   const [manualFollowups, setManualFollowups] = useState<any[]>([]);
+
+  // Client edit states
+  const [isEditingClientDetails, setIsEditingClientDetails] = useState(false);
+  const [editClientName, setEditClientName] = useState("");
+  const [editClientEmail, setEditClientEmail] = useState("");
+  const [editClientPhone, setEditClientPhone] = useState("");
+
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
-  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string }>>({});
+  const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string; nome?: string; email?: string; telefone?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [whatsappForm, setWhatsappForm] = useState({
@@ -594,6 +605,10 @@ export default function App() {
     phoneNumber: "",
     identifier: ""
   });
+
+  useEffect(() => {
+    setIsEditingClientDetails(false);
+  }, [selectedClient]);
 
   const getClientTag = (client: Client) => {
     // 1. Manual tag from Firestore (highest priority)
@@ -1200,10 +1215,8 @@ export default function App() {
     }
   };
 
-  const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string }) => {
-    if (!user) return;
+  const updateClientExtra = async (clientKey: string, updates: { trackingCode?: string; assignedWhatsappId?: string; nome?: string; email?: string; telefone?: string }) => {
     try {
-      const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
       const currentData = clientExtraData[clientKey] || {};
       const newData = {
         clientKey,
@@ -1211,18 +1224,21 @@ export default function App() {
         ...updates,
         updatedAt: new Date().toISOString()
       };
-      
-      await setDoc(docRef, newData, { merge: true });
-
-      if (updates.trackingCode) {
-        addInteractionLog(clientKey, 'tracking_code', `Código de rastreio atualizado: ${updates.trackingCode}`);
-      }
 
       // Local update for immediate feedback
       setClientExtraData(prev => ({
         ...prev,
         [clientKey]: newData
       }));
+
+      if (!user) return;
+
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/clientData`, clientKey);
+      await setDoc(docRef, newData, { merge: true });
+
+      if (updates.trackingCode) {
+        addInteractionLog(clientKey, 'tracking_code', `Código de rastreio atualizado: ${updates.trackingCode}`);
+      }
 
       // Sync with Google Sheets if URL is configured (Column K: Ações, Column W: ZAP)
       if (sheetSyncUrl) {
@@ -1250,7 +1266,10 @@ export default function App() {
               assignedWhatsappId: updates.assignedWhatsappId !== undefined ? updates.assignedWhatsappId : currentData.assignedWhatsappId,
               assignedWhatsappName: assignedAccName,
               tag: currentTagText,
-              zap: assignedAccName
+              zap: assignedAccName,
+              nome: updates.nome !== undefined ? updates.nome : (currentData.nome || ""),
+              email: updates.email !== undefined ? updates.email : (currentData.email || ""),
+              telefone: updates.telefone !== undefined ? updates.telefone : (currentData.telefone || "")
             })
           }).catch(err => console.error("Sync error:", err));
         }
@@ -1299,7 +1318,7 @@ export default function App() {
     return () => unsubscribe();
   }, [authReady, user, effectiveWorkspaceId]);
 
-  const addManualFollowup = async (client: any, dateStr: string) => {
+  const addManualFollowup = async (client: any, dateStr: string, observacao?: string) => {
     if (!client) throw new Error("Cliente inválido ou não selecionado.");
     const clientKey = client.key || '';
     const extra = clientExtraData[clientKey] || {};
@@ -1313,7 +1332,8 @@ export default function App() {
       zap: zapName,
       date: dateStr,
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(observacao ? { observacao } : {})
     };
 
     if (!user || !effectiveWorkspaceId) {
@@ -1335,6 +1355,29 @@ export default function App() {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups`);
+    }
+  };
+
+  const updateManualFollowup = async (followupId: string, updates: { date?: string; observacao?: string }) => {
+    const patch: any = {};
+    if (updates.date !== undefined) patch.date = updates.date;
+    if (updates.observacao !== undefined) patch.observacao = updates.observacao;
+
+    if (!user || !effectiveWorkspaceId) {
+      const saved = localStorage.getItem('crm_manual_followups');
+      const parsed = saved ? JSON.parse(saved) : [];
+      const updated = parsed.map((f: any) => f.id === followupId ? { ...f, ...patch } : f);
+      updated.sort((a: any, b: any) => a.date.localeCompare(b.date));
+      setManualFollowups(updated);
+      localStorage.setItem('crm_manual_followups', JSON.stringify(updated));
+      return;
+    }
+
+    try {
+      const docRef = doc(db, `users/${effectiveWorkspaceId}/manualFollowups`, followupId);
+      await setDoc(docRef, patch, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/manualFollowups/${followupId}`);
     }
   };
 
@@ -2059,14 +2102,21 @@ export default function App() {
       const totalSpent = client.totalSpent + manualSpent;
       
       let status = client.status;
+      const extra = clientExtraData[client.key] || {};
+      const nome = extra.nome || client.nome;
+      const email = extra.email || client.email;
+      const telefone = extra.telefone || client.telefone;
 
       return {
         ...client,
+        nome,
+        email,
+        telefone,
         totalSpent,
         status,
         manualSales: clientManualSales,
-        trackingCode: clientExtraData[client.key]?.trackingCode,
-        assignedWhatsappId: clientExtraData[client.key]?.assignedWhatsappId
+        trackingCode: extra.trackingCode,
+        assignedWhatsappId: extra.assignedWhatsappId
       };
     });
   }, [clients, manualSales, clientExtraData]);
@@ -3240,7 +3290,7 @@ export default function App() {
                   <div className="bg-white border border-modern-border rounded-xl p-5 shadow-sm space-y-4">
                     <h3 className="text-xs font-bold text-modern-text uppercase tracking-wider border-b border-slate-100 pb-2">Agendar Novo Follow-up Manual</h3>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Search Client */}
                       <div className="space-y-1.5 relative">
                         <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block">1. Buscar Cliente (Nome ou Telefone)</label>
@@ -3300,6 +3350,18 @@ export default function App() {
                           className="w-full px-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
                         />
                       </div>
+
+                      {/* Observação */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block">3. Observação (Opcional)</label>
+                        <input
+                          type="text"
+                          value={manualFollowupObservacao}
+                          onChange={(e) => setManualFollowupObservacao(e.target.value)}
+                          placeholder="Ex: Ligar à tarde, oferecer desconto..."
+                          className="w-full px-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all"
+                        />
+                      </div>
                     </div>
 
                     {/* Selected Client Card Section */}
@@ -3334,9 +3396,10 @@ export default function App() {
                                   return;
                                 }
                                 try {
-                                  await addManualFollowup(selectedManualClient, manualFollowupDate);
+                                  await addManualFollowup(selectedManualClient, manualFollowupDate, manualFollowupObservacao);
                                   setSelectedManualClient(null);
                                   setManualFollowupDate("");
+                                  setManualFollowupObservacao("");
                                   setManualSearchQuery("");
                                   alert("Agendamento efetuado com sucesso!");
                                 } catch (error: any) {
@@ -3379,6 +3442,11 @@ export default function App() {
                                   <div>
                                     <p className="font-bold text-modern-text">{f.nome}</p>
                                     <p className="text-[10px] text-modern-secondary leading-tight">{f.telefone}</p>
+                                    {f.observacao && (
+                                      <p className="text-[10px] italic text-[#5f6368] mt-1 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 inline-block font-medium">
+                                        Obs: {f.observacao}
+                                      </p>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="px-3 py-2 border-b border-r border-[#dadce0]">
@@ -3427,6 +3495,17 @@ export default function App() {
                                       </span>
                                     )}
                                     <button
+                                      onClick={() => {
+                                        setEditingFollowupId(f.id);
+                                        setEditingFollowupDate(f.date || "");
+                                        setEditingFollowupObservacao(f.observacao || "");
+                                      }}
+                                      className="px-2 py-1 bg-white hover:bg-slate-50 border border-modern-border hover:border-slate-300 text-modern-secondary hover:text-modern-text rounded transition-all shrink-0"
+                                      title="Editar Follow-up"
+                                    >
+                                      <Edit size={12} />
+                                    </button>
+                                    <button
                                       onClick={() => deleteManualFollowup(f.id)}
                                       className="px-2 py-1 bg-white hover:bg-rose-50 border border-modern-border hover:border-rose-200 text-modern-secondary hover:text-rose-500 rounded transition-all shrink-0"
                                       title="Deletar Follow-up"
@@ -3450,6 +3529,69 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+                  
+                  {editingFollowupId && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center clickable" onClick={e => e.stopPropagation()}>
+                      <div 
+                        onClick={() => setEditingFollowupId(null)}
+                        className="fixed inset-0 bg-modern-text/40 backdrop-blur-sm"
+                      />
+                      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border border-modern-border z-10 space-y-4 relative">
+                        <h3 className="text-sm font-extrabold text-modern-text uppercase tracking-wider border-b border-slate-100 pb-2">Editar Follow-up</h3>
+                        
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block text-left">Data do Follow–up</label>
+                            <input
+                              type="date"
+                              value={editingFollowupDate}
+                              onChange={(e) => setEditingFollowupDate(e.target.value)}
+                              className="w-full px-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all text-left"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-modern-secondary block text-left">Observação</label>
+                            <textarea
+                              value={editingFollowupObservacao}
+                              onChange={(e) => setEditingFollowupObservacao(e.target.value)}
+                              placeholder="Adicione observações..."
+                              rows={3}
+                              className="w-full px-4 py-2 bg-slate-50 border border-modern-border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-modern-primary/20 transition-all resize-none text-left"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setEditingFollowupId(null)}
+                            className="px-4 py-2 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase tracking-wider rounded-lg hover:bg-slate-50 transition-all"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await updateManualFollowup(editingFollowupId, {
+                                  date: editingFollowupDate,
+                                  observacao: editingFollowupObservacao
+                                });
+                                setEditingFollowupId(null);
+                                alert("Agendamento atualizado com sucesso!");
+                              } catch (err: any) {
+                                alert("Erro ao atualizar: " + (err.message || err));
+                              }
+                            }}
+                            className="px-4 py-2 bg-modern-primary text-white text-[10px] font-black uppercase tracking-wider rounded-lg shadow-sm hover:bg-slate-800 transition-all"
+                          >
+                            Salvar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4045,11 +4187,97 @@ export default function App() {
                 </div>
 
                 <div className="mb-12">
-                  <h2 className="text-4xl font-extrabold tracking-tight text-modern-text mb-3 leading-tight">{currentSelectedClient.nome}</h2>
-                  <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary mb-6">
-                    <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><AtSign size={14} /> {currentSelectedClient.email}</p>
-                    <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Phone size={14} /> {currentSelectedClient.telefone}</p>
-                  </div>
+                  {isEditingClientDetails ? (
+                    <div className="space-y-4 p-5 bg-slate-50 border border-modern-border rounded-xl mb-6">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-modern-text">Editar Informações do Cliente</h3>
+                      
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase text-modern-secondary block">Nome do Cliente</label>
+                        <input
+                          type="text"
+                          value={editClientName}
+                          onChange={(e) => setEditClientName(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-modern-border rounded-lg text-xs font-bold focus:outline-none"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black uppercase text-modern-secondary block">Telefone / WhatsApp</label>
+                          <input
+                            type="text"
+                            value={editClientPhone}
+                            onChange={(e) => setEditClientPhone(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-modern-border rounded-lg text-xs font-bold focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black uppercase text-modern-secondary block">E-mail</label>
+                          <input
+                            type="email"
+                            value={editClientEmail}
+                            onChange={(e) => setEditClientEmail(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-modern-border rounded-lg text-xs font-bold focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingClientDetails(false)}
+                          className="px-3 py-1.5 bg-white border border-modern-border text-modern-secondary text-[10px] font-black uppercase rounded-lg hover:bg-slate-100 transition-all"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!editClientName.trim()) {
+                              alert("O nome do cliente é obrigatório.");
+                              return;
+                            }
+                            try {
+                              await updateClientExtra(currentSelectedClient.key, {
+                                nome: editClientName,
+                                telefone: editClientPhone,
+                                email: editClientEmail
+                              });
+                              setIsEditingClientDetails(false);
+                            } catch (err: any) {
+                              alert("Erro ao salvar: " + (err.message || err));
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-modern-primary text-white text-[10px] font-black uppercase rounded-lg hover:bg-slate-800 transition-all shadow-sm"
+                        >
+                          Salvar Cadastro
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <h2 className="text-4xl font-extrabold tracking-tight text-modern-text leading-tight">{currentSelectedClient.nome}</h2>
+                        <button
+                          onClick={() => {
+                            setEditClientName(currentSelectedClient.nome || "");
+                            setEditClientEmail(currentSelectedClient.email || "");
+                            setEditClientPhone(currentSelectedClient.telefone || "");
+                            setIsEditingClientDetails(true);
+                          }}
+                          className="p-2 text-modern-secondary hover:text-modern-primary hover:bg-slate-50 border border-transparent hover:border-modern-border rounded-lg transition-all"
+                          title="Editar Cadastro"
+                        >
+                          <Edit size={16} />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-xs font-bold text-modern-secondary mb-6">
+                        <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><AtSign size={14} /> {currentSelectedClient.email}</p>
+                        <p className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-none border border-modern-border"><Phone size={14} /> {currentSelectedClient.telefone}</p>
+                      </div>
+                    </>
+                  )}
                   
                   <div className="space-y-4">
                     {/* Checkout Link */}
