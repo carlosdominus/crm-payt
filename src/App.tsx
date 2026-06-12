@@ -1051,7 +1051,8 @@ export default function App() {
     productName: "Protocolo Força Natural",
     value: "",
     date: format(new Date(), 'yyyy-MM-dd'),
-    time: format(new Date(), 'HH:mm')
+    time: format(new Date(), 'HH:mm'),
+    saleType: 'pix' as 'pix' | 'payt'
   });
 
   // Filter states
@@ -1651,7 +1652,8 @@ export default function App() {
       value,
       commission,
       date: saleForm.date, // keeping for backward compatibility
-      timestamp: isNaN(timestamp) ? Date.now() : timestamp
+      timestamp: isNaN(timestamp) ? Date.now() : timestamp,
+      saleType: saleForm.saleType || 'pix'
     };
 
     if (!user) {
@@ -1667,7 +1669,8 @@ export default function App() {
         productName: "Protocolo Força Natural",
         value: "",
         date: format(new Date(), 'yyyy-MM-dd'),
-        time: format(new Date(), 'HH:mm')
+        time: format(new Date(), 'HH:mm'),
+        saleType: 'pix' as 'pix' | 'payt'
       });
       toggleTag(newSale.clientKey, 'vendido');
       return;
@@ -1687,7 +1690,8 @@ export default function App() {
       productName: "Protocolo Força Natural",
       value: "",
       date: format(new Date(), 'yyyy-MM-dd'),
-      time: format(new Date(), 'HH:mm')
+      time: format(new Date(), 'HH:mm'),
+      saleType: 'pix' as 'pix' | 'payt'
     });
     
     // Sync sale to Google Sheets if webhook is configured
@@ -1736,7 +1740,8 @@ export default function App() {
       productName: sale.productName,
       value: sale.value.toString().replace('.', ','),
       date: dateStr,
-      time: timeStr
+      time: timeStr,
+      saleType: sale.saleType || 'pix'
     });
     setShowAddSaleModal(true);
   };
@@ -4869,6 +4874,40 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Forma de Pagamento / Canal</label>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSaleForm({ 
+                        ...saleForm, 
+                        saleType: 'pix'
+                      })}
+                      className={`py-2 text-[10px] font-black uppercase tracking-wider border rounded-lg transition-all ${
+                        !saleForm.saleType || saleForm.saleType === 'pix'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-modern-secondary border-modern-border hover:bg-slate-100'
+                      }`}
+                    >
+                      PIX
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaleForm({ 
+                        ...saleForm, 
+                        saleType: 'payt'
+                      })}
+                      className={`py-2 text-[10px] font-black uppercase tracking-wider border rounded-lg transition-all ${
+                        saleForm.saleType === 'payt'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-slate-50 text-modern-secondary border-modern-border hover:bg-slate-100'
+                      }`}
+                    >
+                      Payt
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary block">Categoria</label>
                   <div className="grid grid-cols-2 gap-2 text-xs">

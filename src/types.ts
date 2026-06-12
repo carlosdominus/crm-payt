@@ -44,6 +44,7 @@ export interface ManualSale {
   commission: number;
   date: string;
   timestamp: number;
+  saleType?: 'pix' | 'payt';
 }
 
 export interface WorkspaceInvite {

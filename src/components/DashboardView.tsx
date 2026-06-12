@@ -76,6 +76,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [dashStartDate, setDashStartDate] = useState<string>('');
   const [dashEndDate, setDashEndDate] = useState<string>('');
   const [dashShowUtms, setDashShowUtms] = useState<boolean>(false);
+  const [dashFilterPayment, setDashFilterPayment] = useState<'pix' | 'all'>('all');
 
   // Filter verification helper
   const isWithinDashFilter = (itemTimestampOrDate: number | string) => {
@@ -135,16 +136,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return filteredSalesForDash.length;
   }, [filteredSalesForDash]);
 
-  const commissionMonth = useMemo(() => {
+  const commissionMonthPix = useMemo(() => {
     const currentYearMonth = format(new Date(), 'yyyy-MM');
     return manualSales.reduce((acc, curr) => {
       const saleYearMonth = curr.date.substring(0, 7);
-      if (saleYearMonth === currentYearMonth) {
+      if (saleYearMonth === currentYearMonth && (!curr.saleType || curr.saleType === 'pix')) {
         return acc + curr.commission;
       }
       return acc;
     }, 0);
   }, [manualSales]);
+
+  const commissionMonthPayt = useMemo(() => {
+    const currentYearMonth = format(new Date(), 'yyyy-MM');
+    return manualSales.reduce((acc, curr) => {
+      const saleYearMonth = curr.date.substring(0, 7);
+      if (saleYearMonth === currentYearMonth && curr.saleType === 'payt') {
+        return acc + curr.commission;
+      }
+      return acc;
+    }, 0);
+  }, [manualSales]);
+
+  const commissionMonthTotal = useMemo(() => {
+    return commissionMonthPix + commissionMonthPayt;
+  }, [commissionMonthPix, commissionMonthPayt]);
+
+  const displayedSalesForTable = useMemo(() => {
+    if (dashFilterPayment === 'pix') {
+      return filteredSalesForDash.filter(sale => !sale.saleType || sale.saleType === 'pix');
+    }
+    return filteredSalesForDash;
+  }, [filteredSalesForDash, dashFilterPayment]);
 
   const dashDailySalesAndCommission = useMemo(() => {
     const dailyMap = new Map<string, { date: string; formattedDate: string; count: number; commission: number; value: number }>();
@@ -632,7 +655,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {activeDashSubTab === 'vendas' && (
             <div className="space-y-6">
               {/* Vendas Metrics Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Comissão</p>
@@ -657,18 +680,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Comissão (Mês)</p>
-                    <h4 className="text-xl font-black text-rose-600 mt-1 font-mono">
-                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(commissionMonth)}
-                    </h4>
-                  </div>
-                  <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
-                    <DollarSign size={18} />
-                  </div>
-                </div>
-
-                <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
-                  <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Faturamento Total</p>
                     <h4 className="text-xl font-black text-slate-800 mt-1 font-mono">
                       {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
@@ -678,6 +689,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600">
                     <Package size={18} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Split Month Commissions */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Comissão (Mês) - PIX</p>
+                    <h4 className="text-xl font-black text-emerald-600 mt-1 font-mono">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(commissionMonthPix)}
+                    </h4>
+                  </div>
+                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                    <DollarSign size={18} />
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-modern-secondary">Comissão (Mês) - Payt</p>
+                    <h4 className="text-xl font-black text-blue-600 mt-1 font-mono">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(commissionMonthPayt)}
+                    </h4>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
+                    <DollarSign size={18} />
+                  </div>
+                </div>
+
+                <div className="bg-white border border-rose-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between bg-gradient-to-br from-white to-rose-50/10">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-rose-700">Comissão Total (Mês)</p>
+                    <h4 className="text-xl font-black text-rose-600 mt-1 font-mono">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(commissionMonthTotal)}
+                    </h4>
+                  </div>
+                  <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
+                    <DollarSign size={18} />
                   </div>
                 </div>
               </div>
@@ -1106,21 +1156,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-wider mt-0.5 font-sans">Visão detalhada das vendas filtradas no período atual</p>
                 </div>
                 
-                <div className="flex items-center gap-3 self-start">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-[#5f6368]">{dashShowUtms ? 'Esconder UTMs' : 'Ver UTMs'}</span>
-                  <button 
-                    onClick={() => setDashShowUtms(!dashShowUtms)}
-                    className={cn(
-                      "w-10 h-5 rounded-full relative transition-colors duration-200 focus:outline-none cursor-pointer",
-                      dashShowUtms ? "bg-modern-primary" : "bg-slate-200"
-                    )}
-                  >
-                    <motion.div 
-                      animate={{ x: dashShowUtms ? 20 : 2 }}
-                      className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
-                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                  </button>
+                <div className="flex flex-wrap items-center gap-6 self-start bg-white border border-slate-200/60 p-2 rounded-xl shadow-sm sm:shadow-none sm:border-0 sm:p-0">
+                  {/* Switch PIX / PIX + Payt */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-[#5f6368]">
+                      {dashFilterPayment === 'pix' ? 'Filtro: Apenas PIX' : 'Filtro: PIX + Payt'}
+                    </span>
+                    <button 
+                      onClick={() => setDashFilterPayment(prev => prev === 'all' ? 'pix' : 'all')}
+                      className={cn(
+                        "w-10 h-5 rounded-full relative transition-colors duration-200 focus:outline-none cursor-pointer",
+                        dashFilterPayment === 'all' ? "bg-modern-primary" : "bg-slate-200"
+                      )}
+                      title="Alternar entre apenas PIX ou PIX + Payt"
+                    >
+                      <motion.div 
+                        animate={{ x: dashFilterPayment === 'all' ? 20 : 2 }}
+                        className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
+                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Division line for large screens */}
+                  <div className="hidden sm:block h-4 w-px bg-slate-200" />
+
+                  {/* Switch UTMs */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-[#5f6368]">{dashShowUtms ? 'Esconder UTMs' : 'Ver UTMs'}</span>
+                    <button 
+                      onClick={() => setDashShowUtms(!dashShowUtms)}
+                      className={cn(
+                        "w-10 h-5 rounded-full relative transition-colors duration-200 focus:outline-none cursor-pointer",
+                        dashShowUtms ? "bg-modern-primary" : "bg-slate-200"
+                      )}
+                    >
+                      <motion.div 
+                        animate={{ x: dashShowUtms ? 20 : 2 }}
+                        className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
+                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1135,21 +1212,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       
                       {!dashShowUtms ? (
                         <>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest text-right border-b border-slate-100">Comissão</th>
-                          <th className="py-3 px-4 border-b border-slate-100 w-[80px]"></th>
+                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest text-right border-b border-slate-100">Comissão</th>
+                           <th className="py-3 px-4 border-b border-slate-100 w-[80px]"></th>
                         </>
                       ) : (
                         <>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Source</th>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Medium</th>
-                          <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Campaign</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Source</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Medium</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-modern-secondary uppercase tracking-widest border-b border-slate-100">Campaign</th>
                         </>
                       )}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSalesForDash.length > 0 ? (
-                      filteredSalesForDash.sort((a,b) => b.timestamp - a.timestamp).map(sale => {
+                    {displayedSalesForTable.length > 0 ? (
+                      displayedSalesForTable.sort((a,b) => b.timestamp - a.timestamp).map(sale => {
                         const client = enrichedClients.find(c => c.key === sale.clientKey);
                         const lastLead = client?.leads[0];
                         return (
@@ -1160,8 +1237,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 return `${day}/${month}/${year}`;
                               })()}
                             </td>
-                            <td className="py-3 px-4 text-xs text-modern-text font-medium border-b border-slate-100/65 truncate max-w-[180px]">
-                              {sale.productName}
+                            <td className="py-3 px-4 text-xs text-modern-text font-medium border-b border-slate-100/65 truncate max-w-[180px] flex items-center gap-1.5">
+                              <span className={cn(
+                                "inline-flex items-center text-[8px] font-black uppercase px-1.5 py-0.5 rounded shrink-0",
+                                sale.saleType === 'payt' ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              )}>
+                                {sale.saleType === 'payt' ? 'Payt' : 'PIX'}
+                              </span>
+                              <span className="truncate">{sale.productName}</span>
                             </td>
                             <td className="py-3 px-4 text-xs text-modern-text font-bold border-b border-slate-100/65 font-mono">
                               {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.value)}
@@ -1172,7 +1255,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             
                             {!dashShowUtms ? (
                               <>
-                                <td className="py-3 px-4 text-xs font-black text-emerald-600 text-right border-b border-slate-100/65 font-mono">
+                                <td className="py-3 px-4 text-xs font-black text-emerald-600 text-right border-b border-slate-100/65 font-mono font-bold">
                                   {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.commission)}
                                 </td>
                                 <td className="py-3 px-4 border-b border-slate-100/65 text-right">
