@@ -97,62 +97,63 @@ export const NUTRA_PRODUCTS = [
 
 const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
 
-export const getManualSaleCommission = (productName: string, value: number): number => {
+export const getManualSaleCommission = (productName: string, value: number, saleType?: 'pix' | 'payt'): number => {
   const name = productName.toLowerCase().trim();
+  const finalValue = saleType === 'payt' ? Math.max(0, value * 0.9501 - 1.00) : value;
   
   if (
     name.includes("protocolo") || 
     name.includes("força natural") || 
     name.includes("forca natural")
   ) {
-    return value * 0.5;
+    return finalValue * 0.5;
   }
   if (
     name.includes("diagnóstico") || 
     name.includes("diagnostico") || 
     name.includes("personalizado")
   ) {
-    return value * 0.5;
+    return finalValue * 0.5;
   }
   if (
     name.includes("bônus") || 
     name.includes("bonus") || 
     name.includes("especial")
   ) {
-    return value * 0.5;
+    return finalValue * 0.5;
   }
   if (
     name.includes("tônico") || 
     name.includes("tonico") || 
     name.includes("cavalo")
   ) {
-    return value * 0.5;
+    return finalValue * 0.5;
   }
   if (
     name.includes("prostaapp") || 
     name.includes("prosta app") || 
     name.includes("meu prosta")
   ) {
-    return value * 0.5;
+    return finalValue * 0.5;
   }
   
   if (name.includes("vpower")) {
     if (name.includes("1") || name.includes("um") || name.includes("one")) {
-      return value * 0.23;
+      return finalValue * 0.23;
     }
     if (name.includes("3") || name.includes("três") || name.includes("tres") || name.includes("three")) {
-      return value * 0.25;
+      return finalValue * 0.25;
     }
     if (name.includes("6") || name.includes("seis") || name.includes("six")) {
-      return value * 0.25;
+      return finalValue * 0.25;
     }
   }
   
-  if (name.includes("1 pote")) return value * 0.23;
-  if (name.includes("3 potes")) return value * 0.25;
-  if (name.includes("6 potes")) return value * 0.25;
+  if (name.includes("1 pote")) return finalValue * 0.23;
+  if (name.includes("3 potes")) return finalValue * 0.25;
+  if (name.includes("6 potes")) return finalValue * 0.25;
 
-  return value * 0.5; // default for unknown/other info products
+  return finalValue * 0.5; // default for unknown/other info products
 };
 
 const PAYMENT_METHODS: Record<string, string> = {
@@ -1017,7 +1018,7 @@ export default function App() {
           const parsed = JSON.parse(saved) as ManualSale[];
           const recalculated = parsed.map(s => ({
             ...s,
-            commission: getManualSaleCommission(s.productName, s.value)
+            commission: getManualSaleCommission(s.productName, s.value, s.saleType || 'pix')
           }));
           setManualSales(recalculated);
         } else {
@@ -1033,7 +1034,7 @@ export default function App() {
         const data = doc.data() as ManualSale;
         return {
           ...data,
-          commission: getManualSaleCommission(data.productName, data.value)
+          commission: getManualSaleCommission(data.productName, data.value, data.saleType || 'pix')
         };
       });
       setManualSales(sales);
@@ -1637,7 +1638,7 @@ export default function App() {
     if (!selectedClient || !saleForm.value) return;
 
     const value = parseFloat(saleForm.value.replace(',', '.'));
-    const commission = getManualSaleCommission(saleForm.productName, value);
+    const commission = getManualSaleCommission(saleForm.productName, value, saleForm.saleType || 'pix');
     
     const saleId = editingSaleId || Math.random().toString(36).substr(2, 9);
     
@@ -1733,7 +1734,7 @@ export default function App() {
       }
     }
 
-    const commission = getManualSaleCommission(lead.produto, valNum);
+    const commission = getManualSaleCommission(lead.produto, valNum, 'payt');
 
     // Date/time parsing from strings like "dd/MM/yyyy"
     let dateStr = format(new Date(), 'yyyy-MM-dd');
@@ -5094,7 +5095,7 @@ export default function App() {
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                           (() => {
                             const valNum = parseFloat(saleForm.value.replace(',', '.')) || 0;
-                            return getManualSaleCommission(saleForm.productName, valNum);
+                            return getManualSaleCommission(saleForm.productName, valNum, saleForm.saleType || 'pix');
                           })()
                         )}
                       </p>
