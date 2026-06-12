@@ -1721,6 +1721,82 @@ export default function App() {
     toggleTag(newSale.clientKey, 'vendido');
   };
 
+  const handleMarkLeadAsSold = async (clientKey: string, lead: any) => {
+    // Parse numeric value from lead.valor
+    let valNum = lead.numericValue || 0;
+    if (!valNum && lead.valor) {
+      if (typeof lead.valor === 'number') {
+        valNum = lead.valor;
+      } else {
+        const cleaned = lead.valor.replace(/[^\d,.]/g, '').replace(',', '.');
+        valNum = parseFloat(cleaned) || 0;
+      }
+    }
+
+    const commission = getManualSaleCommission(lead.produto, valNum);
+
+    // Date/time parsing from strings like "dd/MM/yyyy"
+    let dateStr = format(new Date(), 'yyyy-MM-dd');
+    let timeStr = format(new Date(), 'HH:mm');
+    let timestamp = Date.now();
+
+    try {
+      if (lead.data) {
+        const parts = lead.data.split('/');
+        if (parts.length === 3) {
+          dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+      }
+      if (lead.hora) {
+        timeStr = lead.hora.substring(0, 5); // "HH:mm"
+      }
+      const combinedStr = `${dateStr}T${timeStr}:00`;
+      const checkTs = new Date(combinedStr).getTime();
+      if (!isNaN(checkTs)) {
+        timestamp = checkTs;
+      }
+    } catch (err) {
+      console.error("Error parsing date/time from lead:", err);
+    }
+
+    // Generate safe clean ID conform to isValidId: ^[a-zA-Z0-9_\-]+$
+    const rawId = lead.id || lead.codPay || `payt_${Math.random().toString(36).substr(2, 9)}`;
+    const saleId = `payt_${rawId}`.replace(/[^a-zA-Z0-9_\-]/g, '_');
+
+    // Create the Payt sale object
+    const newSale: ManualSale = {
+      id: saleId,
+      clientKey,
+      productName: lead.produto,
+      value: valNum,
+      commission,
+      date: dateStr,
+      timestamp,
+      saleType: 'payt'
+    };
+
+    if (!user) {
+      if (manualSales.some(s => s.id === saleId)) {
+        alert("Esta venda já foi registrada.");
+        return;
+      }
+      const updatedSales = [newSale, ...manualSales];
+      setManualSales(updatedSales);
+      localStorage.setItem('crm_manual_sales', JSON.stringify(updatedSales));
+      toggleTag(clientKey, 'vendido');
+      addInteractionLog(clientKey, 'manual_sale', `Venda Payt registrada como Vendido: ${newSale.productName} (R$ ${newSale.value})`);
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/sales`, saleId), newSale);
+      addInteractionLog(clientKey, 'manual_sale', `Venda Payt registrada como Vendido: ${newSale.productName} (R$ ${newSale.value})`);
+      toggleTag(clientKey, 'vendido');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/sales/${saleId}`);
+    }
+  };
+
   const handleEditSale = (sale: ManualSale) => {
     const client = enrichedClients.find(c => c.key === sale.clientKey);
     if (!client) return;
@@ -4479,95 +4555,114 @@ export default function App() {
                   </div>
 
                   <div className="space-y-8">
-                    {currentSelectedClient.leads.map((lead) => (
-                      <div key={lead.id} className="modern-card p-8 border-none shadow-sm bg-slate-50/50 rounded-2xl">
-                        <div className="flex justify-between items-start mb-6">
-                          <div>
-                            <p className="text-[10px] font-extrabold text-modern-secondary mb-2 flex items-center gap-2">
-                              <Calendar size={12} /> {lead.data} • {lead.hora}
-                            </p>
-                            <h5 className="text-lg font-bold text-modern-text">{lead.produto}</h5>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-lg font-extrabold text-modern-primary mb-2">{lead.valor}</p>
-                            <div className="flex flex-col items-end gap-2">
-                              <span className={cn(
-                                "text-[9px] font-extrabold uppercase tracking-widest px-2 py-1 rounded-md shadow-sm",
-                                STATUS_THEMES[lead.status]?.bg || "bg-slate-100",
-                                STATUS_THEMES[lead.status]?.text || "text-slate-500"
-                              )}>
-                                {lead.status}
-                              </span>
-                              {lead.paymentMethod && (
-                                <span className="text-[8px] font-bold text-modern-secondary uppercase tracking-wider bg-white border border-modern-border px-2 py-0.5 rounded-md">
-                                  {lead.paymentMethod}
+                    {currentSelectedClient.leads.map((lead) => {
+                      const rawId = lead.id || lead.codPay || '';
+                      const saleId = `payt_${rawId}`.replace(/[^a-zA-Z0-9_\-]/g, '_');
+                      const isLeadAlreadySold = manualSales.some(s => s.id === saleId);
+                      return (
+                        <div key={lead.id} className="modern-card p-8 border-none shadow-sm bg-slate-50/50 rounded-2xl">
+                          <div className="flex justify-between items-start mb-6">
+                            <div>
+                              <p className="text-[10px] font-extrabold text-modern-secondary mb-2 flex items-center gap-2">
+                                <Calendar size={12} /> {lead.data} • {lead.hora}
+                              </p>
+                              <h5 className="text-lg font-bold text-modern-text">{lead.produto}</h5>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-extrabold text-modern-primary mb-2">{lead.valor}</p>
+                              <div className="flex flex-col items-end gap-2">
+                                <span className={cn(
+                                  "text-[9px] font-extrabold uppercase tracking-widest px-2 py-1 rounded-md shadow-sm",
+                                  STATUS_THEMES[lead.status]?.bg || "bg-slate-100",
+                                  STATUS_THEMES[lead.status]?.text || "text-slate-500"
+                                )}>
+                                  {lead.status}
                                 </span>
-                              )}
+                                {lead.paymentMethod && (
+                                  <span className="text-[8px] font-bold text-modern-secondary uppercase tracking-wider bg-white border border-modern-border px-2 py-0.5 rounded-md">
+                                    {lead.paymentMethod}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => handleGenerateMessage(lead)}
-                            className="modern-button text-xs py-3 px-8 rounded-lg"
-                          >
-                            Gerar Mensagem IA
-                          </button>
-                          <div className="flex-1" />
-                          <p className="text-[10px] text-modern-secondary font-mono bg-white px-2 py-1 rounded-md border border-modern-border">ID: {lead.codPay}</p>
-                        </div>
+                          <div className="flex flex-wrap items-center gap-4">
+                            <button 
+                              onClick={() => handleGenerateMessage(lead)}
+                              className="modern-button text-xs py-3 px-8 rounded-lg"
+                            >
+                              Gerar Mensagem IA
+                            </button>
 
-                        <AnimatePresence>
-                          {generating && selectedLead?.id === lead.id && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              className="mt-6 p-5 bg-modern-primary/5 rounded-lg italic text-xs text-modern-primary font-medium border border-modern-primary/10"
-                            >
-                              Compondo abordagem personalizada com IA...
-                            </motion.div>
-                          )}
-                          {generatedMessage && selectedLead?.id === lead.id && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              className="mt-6 space-y-5"
-                            >
-                              <div className="relative">
-                                <textarea 
-                                  readOnly
-                                  value={generatedMessage}
-                                  className="w-full h-40 p-5 bg-white border border-modern-border rounded-xl text-xs font-medium text-modern-text focus:outline-none resize-none leading-relaxed shadow-inner"
-                                />
-                                <button 
-                                  onClick={() => copyToClipboard(generatedMessage)}
-                                  className="absolute bottom-4 right-4 p-3 bg-white rounded-xl shadow-lg border border-modern-border text-modern-secondary hover:text-modern-primary transition-all"
-                                >
-                                  {copied ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
-                                </button>
-                              </div>
-                              <div className="flex gap-4">
-                                <a 
-                                  href={`https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="modern-button flex-1 flex items-center justify-center gap-3"
-                                >
-                                  <ExternalLink size={16} /> Enviar WhatsApp
-                                </a>
-                                <button 
-                                  onClick={() => {setGeneratedMessage(null); setSelectedLead(null);}}
-                                  className="modern-button-secondary"
-                                >
-                                  Fechar
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    ))}
+                            {isLeadAlreadySold ? (
+                              <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-lg uppercase tracking-wider">
+                                <CheckCircle2 size={12} className="text-emerald-600" /> Vendido Payt ✅
+                              </span>
+                            ) : (
+                              <button 
+                                onClick={() => handleMarkLeadAsSold(currentSelectedClient.key, lead)}
+                                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-[10px] font-extrabold uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 active:scale-95 duration-200 cursor-pointer"
+                              >
+                                Marcar como Vendido (Payt)
+                              </button>
+                            )}
+
+                            <div className="flex-1" />
+                            <p className="text-[10px] text-modern-secondary font-mono bg-white px-2 py-1 rounded-md border border-modern-border">ID: {lead.codPay}</p>
+                          </div>
+
+                          <AnimatePresence>
+                            {generating && selectedLead?.id === lead.id && (
+                              <motion.div 
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                className="mt-6 p-5 bg-modern-primary/5 rounded-lg italic text-xs text-modern-primary font-medium border border-modern-primary/10"
+                              >
+                                Compondo abordagem personalizada com IA...
+                              </motion.div>
+                            )}
+                            {generatedMessage && selectedLead?.id === lead.id && (
+                              <motion.div 
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                className="mt-6 space-y-5"
+                              >
+                                <div className="relative">
+                                  <textarea 
+                                    readOnly
+                                    value={generatedMessage}
+                                    className="w-full h-40 p-5 bg-white border border-modern-border rounded-xl text-xs font-medium text-modern-text focus:outline-none resize-none leading-relaxed shadow-inner"
+                                  />
+                                  <button 
+                                    onClick={() => copyToClipboard(generatedMessage)}
+                                    className="absolute bottom-4 right-4 p-3 bg-white rounded-xl shadow-lg border border-modern-border text-modern-secondary hover:text-modern-primary transition-all"
+                                  >
+                                    {copied ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
+                                  </button>
+                                </div>
+                                <div className="flex gap-4">
+                                  <a 
+                                    href={`https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="modern-button flex-1 flex items-center justify-center gap-3"
+                                  >
+                                    <ExternalLink size={16} /> Enviar WhatsApp
+                                  </a>
+                                  <button 
+                                    onClick={() => {setGeneratedMessage(null); setSelectedLead(null);}}
+                                    className="modern-button-secondary"
+                                  >
+                                    Fechar
+                                  </button>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
