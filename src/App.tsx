@@ -83,6 +83,8 @@ const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1DhS7ewyAV6lBR6fag
 
 export const INFO_PRODUCTS = [
   { name: "Protocolo Força Natural", commissionRate: 0.5 },
+  { name: "Protocolo da Verdade", commissionRate: 0.5 },
+  { name: "Método Nexus", commissionRate: 0.5 },
   { name: "Diagnóstico Personalizado", commissionRate: 0.5 },
   { name: "Bônus Especial", commissionRate: 0.5 },
   { name: "Tônico do Cavalo", commissionRate: 0.5 },
@@ -99,7 +101,7 @@ const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
 
 export const getManualSaleCommission = (productName: string, value: number, saleType?: 'pix' | 'payt'): number => {
   const name = productName.toLowerCase().trim();
-  const finalValue = saleType === 'payt' ? Math.max(0, value * 0.9501 - 1.00) : value;
+  const finalValue = saleType === 'payt' ? Math.max(0, value * 0.95 - 0.99) : value;
   
   if (
     name.includes("protocolo") || 
@@ -133,6 +135,12 @@ export const getManualSaleCommission = (productName: string, value: number, sale
     name.includes("prostaapp") || 
     name.includes("prosta app") || 
     name.includes("meu prosta")
+  ) {
+    return finalValue * 0.5;
+  }
+  if (
+    name.includes("verdade") ||
+    name.includes("nexus")
   ) {
     return finalValue * 0.5;
   }
