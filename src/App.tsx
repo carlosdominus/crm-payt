@@ -563,7 +563,16 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 150); // Fluid debounce prevents CPU-heavy filter re-calculations on every keystroke
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [generatedMessage, setGeneratedMessage] = useState<string | null>(null);
@@ -2088,32 +2097,27 @@ export default function App() {
             }
           });
  
-          // Pass 2: Merge any clients that share the same non-empty phone or same non-empty email
+          // Pass 2: Merge any clients that share the same non-empty phone or same non-empty email using fast O(N) HashMap lookup
           const mergedClientsList: Client[] = [];
-          
+          const emailLookup = new Map<string, Client>();
+          const phoneLookup = new Map<string, Client>();
+
           clientsList.forEach(client => {
             let existing: Client | undefined;
             const emailKey = client.email?.toLowerCase().trim();
             const phoneKey = client.telefone?.trim();
             const isValPhone = phoneKey && isValidPhone(phoneKey);
-            
-            for (const other of mergedClientsList) {
-              const otherEmail = other.email?.toLowerCase().trim();
-              const otherPhone = other.telefone?.trim();
-              const isOtherValPhone = otherPhone && isValidPhone(otherPhone);
-              
-              if (emailKey && otherEmail && emailKey === otherEmail) {
-                existing = other;
-                break;
-              }
-              if (isValPhone && isOtherValPhone && phoneKey === otherPhone) {
-                if (!emailKey || !otherEmail || emailKey === otherEmail) {
-                  existing = other;
-                  break;
-                }
+
+            if (emailKey && emailLookup.has(emailKey)) {
+              existing = emailLookup.get(emailKey);
+            } else if (isValPhone && phoneLookup.has(phoneKey)) {
+              const candidate = phoneLookup.get(phoneKey)!;
+              const candidateEmail = candidate.email?.toLowerCase().trim();
+              if (!emailKey || !candidateEmail || emailKey === candidateEmail) {
+                existing = candidate;
               }
             }
-            
+
             if (existing) {
               existing.leads = [...existing.leads, ...client.leads];
               if (!existing.email && client.email) {
@@ -2131,8 +2135,24 @@ export default function App() {
                 existing.lastPurchaseTimestamp = client.lastPurchaseTimestamp;
                 existing.status = client.status;
               }
+              
+              // Maintain/Update indices for the existing client
+              const existingEmail = existing.email?.toLowerCase().trim();
+              const existingPhone = existing.telefone?.trim();
+              if (existingEmail) {
+                emailLookup.set(existingEmail, existing);
+              }
+              if (existingPhone && isValidPhone(existingPhone)) {
+                phoneLookup.set(existingPhone, existing);
+              }
             } else {
               mergedClientsList.push(client);
+              if (emailKey) {
+                emailLookup.set(emailKey, client);
+              }
+              if (isValPhone) {
+                phoneLookup.set(phoneKey, client);
+              }
             }
           });
 
@@ -2256,6 +2276,8 @@ export default function App() {
     }
 
     const manualSalesKeys = new Set(manualSales.map(s => s.clientKey));
+    const startMs = start ? start.getTime() : 0;
+    const endMs = end ? end.getTime() : 0;
 
     return enrichedClients.filter(client => {
       const clientKey = client.key;
@@ -2282,8 +2304,7 @@ export default function App() {
           matchesDate = true;
         } else {
           matchesDate = client.leads.some(l => {
-            const leadDate = new Date(l.timestamp);
-            return isWithinInterval(leadDate, { start: start!, end: end! });
+            return l.timestamp >= startMs && l.timestamp <= endMs;
           });
         }
       }
