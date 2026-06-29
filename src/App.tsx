@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue, useRef, useCallback } from 'react';
 import Papa from 'papaparse';
 import { 
   Settings,
@@ -2319,6 +2319,62 @@ export default function App() {
     });
   }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, productFilter, clientTags, showOnlyManualSales, manualSales]);
 
+  const getClientDisplayLead = useCallback((client: Client) => {
+    if (!client.leads || client.leads.length === 0) return null;
+    
+    const hasProductFilter = productFilter.length > 0 && !productFilter.includes('all');
+    const hasStatusFilter = statusFilter.length > 0 && !statusFilter.includes('all');
+    const hasDateFilter = filterType !== 'all';
+
+    if (!hasProductFilter && !hasStatusFilter && !hasDateFilter) {
+      return client.leads[0];
+    }
+
+    const matchingLead = client.leads.find(l => {
+      if (hasProductFilter) {
+        if (!l.produto || !productFilter.includes(l.produto.trim())) {
+          return false;
+        }
+      }
+      if (hasStatusFilter) {
+        if (!l.status || !statusFilter.includes(l.status)) {
+          return false;
+        }
+      }
+      if (hasDateFilter) {
+        if (filterType === 'custom' && customStartDate && customEndDate) {
+          const startMs = customStartDate.getTime();
+          const endMs = customEndDate.getTime();
+          if (l.timestamp < startMs || l.timestamp > endMs) {
+            return false;
+          }
+        } else {
+          let start: Date | null = null;
+          let end: Date | null = null;
+          const now = new Date();
+          if (filterType === 'today') {
+            start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+            end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+          } else if (filterType === 'week') {
+            start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            end = now;
+          } else if (filterType === 'month') {
+            start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            end = now;
+          }
+          if (start && end) {
+            if (l.timestamp < start.getTime() || l.timestamp > end.getTime()) {
+              return false;
+            }
+          }
+        }
+      }
+      return true;
+    });
+
+    return matchingLead || client.leads[0];
+  }, [productFilter, statusFilter, filterType, customStartDate, customEndDate]);
+
   const currentSelectedClient = useMemo(() => {
     if (!selectedClient) return null;
     return enrichedClients.find(c => c.key === selectedClient.key) || selectedClient;
@@ -3071,9 +3127,9 @@ export default function App() {
     if (top10.length === 0) return;
     
     const textToCopy = top10.map(client => {
-      const lastLead = client.leads[0];
+      const lastLead = getClientDisplayLead(client);
       const prod = lastLead?.produto || 'Sem produto';
-      const status = client.status || 'Sem status';
+      const status = lastLead?.status || client.status || 'Sem status';
       return `${client.nome} - ${client.telefone} - ${prod} - ${status}`;
     }).join('\n');
     
@@ -4056,7 +4112,7 @@ export default function App() {
                     const manualTag = clientTags[clientKey];
                     const currentTag = getClientTag(client);
                     
-                    const lastLead = client.leads[0]; // Leads are sorted by timestamp desc
+                    const lastLead = getClientDisplayLead(client); // Match the active filters
                     const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
 
                     return (
@@ -4300,10 +4356,10 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <div className={cn(
                               "px-1.5 py-0.5 rounded-md text-[9px] font-medium uppercase tracking-wider",
-                              STATUS_THEMES[client.status]?.bg || "bg-slate-100",
-                              STATUS_THEMES[client.status]?.text || "text-slate-500"
+                              STATUS_THEMES[lastLead?.status || client.status]?.bg || "bg-slate-100",
+                              STATUS_THEMES[lastLead?.status || client.status]?.text || "text-slate-500"
                             )}>
-                              {client.status}
+                              {lastLead?.status || client.status}
                             </div>
                             <div className={cn(
                               "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center",
