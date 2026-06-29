@@ -1076,6 +1076,7 @@ export default function App() {
   // Filter states
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [productFilter, setProductFilter] = useState<string[]>([]);
   const [showOnlyManualSales, setShowOnlyManualSales] = useState(false);
   const [showUtms, setShowUtms] = useState(false);
 
@@ -2298,6 +2299,11 @@ export default function App() {
         return tag === tf;
       });
 
+      const matchesProduct = productFilter.length === 0 || productFilter.includes('all') || (
+        client.leads.some(l => l.produto && productFilter.includes(l.produto.trim())) ||
+        (client.manualSales || []).some(ms => ms.productName && productFilter.includes(ms.productName.trim()))
+      );
+
       let matchesDate = true;
       if (filterType !== 'all') {
         if (filterType === 'custom' && (!customStartDate || !customEndDate)) {
@@ -2309,9 +2315,9 @@ export default function App() {
         }
       }
       
-      return matchesSearch && matchesStatus && matchesTag && matchesDate;
+      return matchesSearch && matchesStatus && matchesTag && matchesProduct && matchesDate;
     });
-  }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, clientTags, showOnlyManualSales, manualSales]);
+  }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, productFilter, clientTags, showOnlyManualSales, manualSales]);
 
   const currentSelectedClient = useMemo(() => {
     if (!selectedClient) return null;
@@ -2387,6 +2393,23 @@ export default function App() {
   const uniqueStatuses = useMemo(() => {
     const statuses = new Set(enrichedClients.map(c => c.status));
     return Array.from(statuses).sort();
+  }, [enrichedClients]);
+
+  const uniqueProducts = useMemo(() => {
+    const products = new Set<string>();
+    enrichedClients.forEach(client => {
+      client.leads.forEach(l => {
+        if (l.produto) {
+          products.add(l.produto.trim());
+        }
+      });
+      client.manualSales?.forEach(ms => {
+        if (ms.productName) {
+          products.add(ms.productName.trim());
+        }
+      });
+    });
+    return Array.from(products).sort();
   }, [enrichedClients]);
 
   const followupClients = useMemo(() => {
@@ -3861,6 +3884,50 @@ export default function App() {
                               </button>
                             );
                           })}
+                        </div>
+                      </div>
+
+                      {/* Produtos */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Produtos</p>
+                        <div className="max-h-36 overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-slate-200">
+                          <button
+                            onClick={() => setProductFilter([])}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
+                              productFilter.length === 0
+                                ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                            )}
+                          >
+                            Todos os Produtos {productFilter.length > 0 ? `(${productFilter.length} selecionados)` : "• Ativo"}
+                          </button>
+                          <div className="grid grid-cols-1 gap-1.5">
+                            {uniqueProducts.map(prod => {
+                              const isSelected = productFilter.includes(prod);
+                              return (
+                                <button
+                                  key={prod}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setProductFilter(prev => prev.filter(p => p !== prod));
+                                    } else {
+                                      setProductFilter(prev => [...prev, prod]);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border truncate",
+                                    isSelected
+                                      ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                      : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                                  )}
+                                  title={prod}
+                                >
+                                  {prod}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
 
