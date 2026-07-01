@@ -329,7 +329,27 @@ const PT_NAMES = new Set([
   "tito", "tomas", "tony", "ubirajara", "valdemir", "valdomiro", "vanderson", "vanderlei", 
   "vanderley", "vasco", "vicente", "vinicius", "vagner", "wagner", "washington", "wellingthon", 
   "wellington", "wendel", "wendell", "werner", "wesley", "william", "willian", "wilson", "yasmin", "yuri",
-  "eliano", "delaceli",
+  "eliano", "delaceli", "luciana", "almeida", "iara", "dayverson", "daverson", "vianna", "viana", "clara",
+  "isabela", "gabriela", "mariana", "larissa", "isabel", "eduarda", "bianca", "luana", "carolina", "sophia",
+  "helena", "alice", "manuela", "valentina", "lorena", "cecil", "cecilia", "sarah", "rebeca", "ester",
+  "raquel", "miriam", "thais", "tais", "vanessa", "priscila", "gisele", "giselle", "michele", "daiane",
+  "dayane", "elaine", "cristiane", "simone", "monica", "claudia", "renata", "adriana", "andreia", "andrea",
+  "fabiana", "luciane", "marcia", "marli", "marly", "solange", "sandra", "teresa", "thereza", "fatima",
+  "lourdes", "aparecida", "carla", "daniela", "fernanda", "juliana", "aline", "cintia", "camila", "amanda",
+  "flavia", "glaucia", "karina", "carina", "talita", "nayara", "naiara", "poliana", "tania", "samara",
+  "sabrina", "paloma", "pamela", "jessica", "suelen", "bruna", "ariane", "debora", "lidiane", "liliane",
+  "lilian", "viviane", "vivian", "vladimir", "valdecir", "valdemar", "valdemir", "valdir", "valdomiro",
+  "valente", "valeria", "valerio", "valter", "vanda", "vanessa", "vanderlei", "vanderley", "vania", "vera",
+  "veronica", "vilma", "wilma", "wanda", "vanda", "yara", "ygor", "isaque", "italo", "ivone", "izabel", "jacqueline", "jaqueline",
+  "janaina", "jandira", "jane", "janete", "janice", "jaque", "jeremias", "jesse", "joana", "joao", "joaquim",
+  "joel", "joelma", "jonatas", "juliano", "jurema", "juscelino", "karla", "katia", "kelly", "laerte", "laura",
+  "leila", "lenita", "lia", "lidia", "ligia", "liliana", "lina", "livia", "lorena", "lourival", "lucia",
+  "luiza", "luzia", "mabel", "madalena", "maira", "marcela", "margarete", "marilia", "marise", "marlene",
+  "marta", "mayara", "meire", "milena", "mirela", "mirella", "nadia", "nadja", "nair", "nanici", "natalia",
+  "nathalia", "neusa", "neuza", "nilce", "nilza", "noemi", "norma", "nubia", "ofelia", "olga", "olivia",
+  "pilar", "rita", "romulo", "rosa", "rosana", "rosangela", "rose", "rosemeire", "rosely", "rosimeri", "rubem",
+  "salomao", "shirley", "sonia", "sueli", "suely", "suzana", "susana", "tadeu", "telma", "teofilo",
+  "terezinha", "thomas", "vania", "vera", "yvone", "zenaide", "zilda", "zuleica",
 
   // Surnames (unaccented, lowercase)
   "silva", "santos", "oliveira", "souza", "sousa", "ferreira", "alves", "pereira", "gomes", "ribeiro", 
@@ -360,138 +380,144 @@ const PT_NAMES = new Set([
 
 const JUNK_WORDS = new Set(['ltda', 'tda', 'me', 'eireli', 'xp', 'online', 'sp', 'mg', 'br', 'com', 'adm', 'contato', 'web', 'site']);
 
-const segmentWord = (rawWord: string): string[] => {
-  const wordLower = rawWord.toLowerCase();
+const findSegmentation = (wordLower: string): string[] | null => {
+  if (wordLower.length === 0) return [];
+  if (PT_NAMES.has(wordLower) && wordLower.length >= 2) return [wordLower];
   
-  // If the word itself is already in the dictionary or is very short, return as is
-  if (PT_NAMES.has(wordLower) || wordLower.length < 5) {
-    return [wordLower];
-  }
+  const memo = new Map<number, string[] | null>();
   
-  const memo = new Map<number, { words: string[], score: number }>();
-  
-  const solve = (index: number): { words: string[], score: number } => {
+  const solve = (index: number): string[] | null => {
     if (index === wordLower.length) {
-      return { words: [], score: 0 };
+      return [];
     }
     if (memo.has(index)) {
       return memo.get(index)!;
     }
     
-    let bestResult: { words: string[], score: number } | null = null;
-    
-    // We try to match a name from PT_NAMES starting at index, with length from 15 down to 3
+    // We try to match prefix from index of length 15 down to 3
     for (let len = Math.min(15, wordLower.length - index); len >= 3; len--) {
       const candidate = wordLower.substring(index, index + len);
       if (PT_NAMES.has(candidate)) {
         const next = solve(index + len);
-        const currentScore = len * len + next.score;
-        if (!bestResult || currentScore > bestResult.score) {
-          bestResult = {
-            words: [candidate, ...next.words],
-            score: currentScore
-          };
+        if (next !== null) {
+          const res = [candidate, ...next];
+          memo.set(index, res);
+          return res;
         }
       }
     }
     
-    // Also try common Portuguese conjunctions like 'de', 'da', 'do', 'e'
+    // Also try prepositions 'de', 'da', 'do', 'e'
     for (const conj of ['de', 'da', 'do', 'e']) {
       if (wordLower.startsWith(conj, index)) {
         const next = solve(index + conj.length);
-        const currentScore = conj.length * conj.length + next.score;
-        if (!bestResult || currentScore > bestResult.score) {
-          bestResult = {
-            words: [conj, ...next.words],
-            score: currentScore
-          };
+        if (next !== null) {
+          const res = [conj, ...next];
+          memo.set(index, res);
+          return res;
         }
       }
     }
     
-    // Fallback: match 1 character as unmatched
-    {
-      const candidate = wordLower.substring(index, index + 1);
-      const next = solve(index + 1);
-      const currentScore = next.score; // 0 score for unmatched to maximize dictionary matches
-      if (!bestResult || currentScore >= bestResult.score) {
-        bestResult = {
-          words: [candidate, ...next.words],
-          score: currentScore
-        };
-      }
-    }
-    
-    memo.set(index, bestResult!);
-    return bestResult!;
+    memo.set(index, null);
+    return null;
   };
   
-  const rawSegments = solve(0).words;
-  
-  // Post-processing: merge contiguous unmatched blocks
-  const finalSegments: string[] = [];
-  let currentUnmatched = '';
-  
-  const isDict = (seg: string): boolean => {
-    return (PT_NAMES.has(seg) && seg.length >= 3) || ['de', 'da', 'do', 'e'].includes(seg);
-  };
-  
-  for (const seg of rawSegments) {
-    if (isDict(seg)) {
-      if (currentUnmatched) {
-        finalSegments.push(currentUnmatched);
-        currentUnmatched = '';
-      }
-      finalSegments.push(seg);
-    } else {
-      currentUnmatched += seg;
-    }
-  }
-  if (currentUnmatched) {
-    finalSegments.push(currentUnmatched);
-  }
-  
-  return finalSegments;
+  return solve(0);
 };
 
 const getNameFromEmail = (email?: string): string => {
   if (!email) return '';
   const username = email.split('@')[0].toLowerCase();
   
-  // Replace symbols like dots, underscores, hyphens, and numbers with spaces
-  const cleaned = username.replace(/[0-9._-]+/g, ' ').trim();
-  const tokens = cleaned.split(/\s+/);
+  // Clean numbers (digits), replace with empty string or space
+  const cleanedUsername = username.replace(/[0-9]+/g, ' ').trim();
   
-  const allWords: string[] = [];
+  // Split by common separators: dot, underscore, dash, space
+  const rawTokens = cleanedUsername.split(/[._\-\s]+/);
   
-  for (const token of tokens) {
+  const processedTokens: string[] = [];
+  
+  for (const rToken of rawTokens) {
+    const token = rToken.trim();
     if (!token) continue;
-    const pieces = segmentWord(token);
-    for (const piece of pieces) {
-      if (piece) {
-        allWords.push(piece);
+    
+    // Check if the token itself is in our dictionary or can be segmented perfectly
+    const segmented = findSegmentation(token);
+    if (segmented && segmented.length > 0) {
+      processedTokens.push(...segmented);
+    } else {
+      // If the token does not segment perfectly, do we split it? No!
+      // But maybe it ends with a long known name/surname (like "vianna" in "afvianna")?
+      let matchedSuffix = false;
+      for (let len = token.length - 1; len >= 5; len--) {
+        const suffix = token.substring(token.length - len);
+        if (PT_NAMES.has(suffix)) {
+          const prefix = token.substring(0, token.length - len);
+          if (prefix) processedTokens.push(prefix);
+          processedTokens.push(suffix);
+          matchedSuffix = true;
+          break;
+        }
+      }
+      if (!matchedSuffix) {
+        processedTokens.push(token);
       }
     }
   }
   
-  // Filter out known junk words
-  const filteredWords = allWords.filter(word => !JUNK_WORDS.has(word.toLowerCase()));
+  // Filter out junk words
+  const nonJunkTokens = processedTokens.filter(t => t && !JUNK_WORDS.has(t.toLowerCase()));
   
-  // If we filtered out everything, fallback to the first word of the original cleaned string
-  if (filteredWords.length === 0) {
-    const firstToken = tokens[0];
-    return firstToken ? firstToken.charAt(0).toUpperCase() + firstToken.slice(1) : '';
+  // Apply "Ana Un" rule: discard short unrecognized words if we already have a recognized name
+  const hasRecognizedName = nonJunkTokens.some(t => PT_NAMES.has(t.toLowerCase()) && !['de', 'da', 'do', 'das', 'dos', 'e'].includes(t.toLowerCase()));
+  
+  const filteredTokens: string[] = [];
+  for (let i = 0; i < nonJunkTokens.length; i++) {
+    const token = nonJunkTokens[i];
+    const lower = token.toLowerCase();
+    
+    const isPrep = ['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower);
+    const isRecognized = PT_NAMES.has(lower);
+    
+    if (isPrep) {
+      if (i > 0 && i < nonJunkTokens.length - 1) {
+        filteredTokens.push(token);
+      }
+      continue;
+    }
+    
+    if (isRecognized) {
+      filteredTokens.push(token);
+    } else {
+      // Unrecognized word
+      if (lower.length <= 3 && hasRecognizedName) {
+        continue;
+      }
+      if (lower.length <= 3 && i > 0) {
+        continue;
+      }
+      filteredTokens.push(token);
+    }
   }
   
-  return filteredWords
-    .map(word => {
-      const lower = word.toLowerCase();
-      if (['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower)) {
-        return lower;
-      }
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(' ');
+  // Format casing nicely
+  const finalWords = filteredTokens.map(word => {
+    const lower = word.toLowerCase();
+    if (['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower)) {
+      return lower;
+    }
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  });
+  
+  if (finalWords.length === 0 && rawTokens.length > 0) {
+    const first = rawTokens[0];
+    if (first) {
+      return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+    }
+  }
+  
+  return finalWords.join(' ');
 };
 
 const cleanCustomerName = (name: string, email?: string): string => {
