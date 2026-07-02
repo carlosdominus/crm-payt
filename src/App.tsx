@@ -551,42 +551,56 @@ const parseDateTime = (dateStr: string, timeStr: string): Date | null => {
   if (!dateStr) return null;
   const combined = timeStr ? `${dateStr.trim()} ${timeStr.trim()}` : dateStr.trim();
   
-  // Try standard Date constructor (handles ISO, yyyy-MM-dd, etc.)
-  let d = new Date(combined);
-  if (!isNaN(d.getTime())) return d;
+  let d: Date | null = null;
   
-  // Try dd/MM/yyyy HH:mm:ss
-  try {
-    d = parse(combined, 'dd/MM/yyyy HH:mm:ss', new Date());
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {}
-  
-  // Try dd/MM/yyyy HH:mm
-  try {
-    d = parse(combined, 'dd/MM/yyyy HH:mm', new Date());
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {}
-
-  // Try dd/MM/yyyy
-  try {
-    d = parse(combined, 'dd/MM/yyyy', new Date());
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {}
-
-  // Try yyyy-MM-dd HH:mm:ss
-  try {
-    d = parse(combined, 'yyyy-MM-dd HH:mm:ss', new Date());
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {}
-
-  // Try yyyy-MM-dd HH:mm
-  try {
-    d = parse(combined, 'yyyy-MM-dd HH:mm', new Date());
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {}
-
-  // Manual fallback parse for dd/MM/yyyy
+  // 1. If it's a Brazilian format (dd/MM/yyyy), prioritize dd/MM/yyyy parsing!
   if (dateStr.includes('/')) {
+    // Try dd/MM/yyyy HH:mm:ss
+    try {
+      const parsed = parse(combined, 'dd/MM/yyyy HH:mm:ss', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+    
+    // Try dd/MM/yyyy HH:mm
+    try {
+      const parsed = parse(combined, 'dd/MM/yyyy HH:mm', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+
+    // Try dd/MM/yyyy
+    try {
+      const parsed = parse(combined, 'dd/MM/yyyy', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+  }
+  
+  // 2. If it's an ISO / hyphenated format (yyyy-MM-dd), prioritize yyyy-MM-dd parsing!
+  if (dateStr.includes('-')) {
+    // Try yyyy-MM-dd HH:mm:ss
+    try {
+      const parsed = parse(combined, 'yyyy-MM-dd HH:mm:ss', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+
+    // Try yyyy-MM-dd HH:mm
+    try {
+      const parsed = parse(combined, 'yyyy-MM-dd HH:mm', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+    
+    // Try yyyy-MM-dd
+    try {
+      const parsed = parse(combined, 'yyyy-MM-dd', new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {}
+  }
+
+  // 3. Fallback standard Date constructor only if it's NOT a slash-based date
+  if (!dateStr.includes('/')) {
+    const fallbackDate = new Date(combined);
+    if (!isNaN(fallbackDate.getTime())) return fallbackDate;
+  } else {
+    // 4. Manual fallback parse for dd/MM/yyyy
     const parts = dateStr.split('/');
     if (parts.length === 3) {
       const day = parseInt(parts[0], 10);
@@ -603,8 +617,8 @@ const parseDateTime = (dateStr: string, timeStr: string): Date | null => {
           }
         }
       }
-      d = new Date(year, month, day, hour, minute, second);
-      if (!isNaN(d.getTime())) return d;
+      const fallbackDate = new Date(year, month, day, hour, minute, second);
+      if (!isNaN(fallbackDate.getTime())) return fallbackDate;
     }
   }
 
