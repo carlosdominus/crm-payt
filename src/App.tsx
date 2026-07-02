@@ -536,10 +536,32 @@ const cleanCustomerName = (name: string, email?: string): string => {
   return trimmed;
 };
 
+const isObsoleteLead = (lead: Lead, allLeads: Lead[]): boolean => {
+  if (lead.status === 'Aprovado' || lead.status === 'Reembolsado') {
+    return false;
+  }
+  
+  // An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product
+  // that was created at the same time or later (or within 2 hours before, to handle slight clock issues).
+  const hasApprovedSameProduct = allLeads.some(l => 
+    l.status === 'Aprovado' && 
+    l.produto && lead.produto && 
+    l.produto.toLowerCase().trim() === lead.produto.toLowerCase().trim() &&
+    l.timestamp >= lead.timestamp - 7200000
+  );
+  
+  return hasApprovedSameProduct;
+};
+
 const determineActiveStatus = (leads: Lead[]): string => {
   if (!leads || leads.length === 0) return 'Sem status';
   
-  const sorted = [...leads].sort((a, b) => b.timestamp - a.timestamp);
+  // Filter out obsolete leads before determining status!
+  // A lead is obsolete if it's unpaid and there's an 'Aprovado' lead for the same product.
+  const activeLeads = leads.filter(lead => !isObsoleteLead(lead, leads));
+  const targetLeads = activeLeads.length > 0 ? activeLeads : leads;
+  
+  const sorted = [...targetLeads].sort((a, b) => b.timestamp - a.timestamp);
   const mostRecent = sorted[0];
   
   if (sorted.length === 1) return mostRecent.status;
@@ -2353,10 +2375,17 @@ export default function App() {
     const hasDateFilter = filterType !== 'all';
 
     if (!hasProductFilter && !hasStatusFilter && !hasDateFilter) {
-      return client.leads[0];
+      // Return the most recent non-obsolete lead, or client.leads[0] if none found or all are obsolete
+      const nonObsolete = client.leads.filter(l => !isObsoleteLead(l, client.leads));
+      return nonObsolete.length > 0 ? nonObsolete[0] : client.leads[0];
     }
 
     const matchingLead = client.leads.find(l => {
+      // Ignore obsolete leads for matching purposes when filters are active
+      if (isObsoleteLead(l, client.leads)) {
+        return false;
+      }
+      
       if (hasProductFilter) {
         if (!l.produto || !productFilter.includes(l.produto.trim())) {
           return false;
@@ -2369,8 +2398,8 @@ export default function App() {
       }
       if (hasDateFilter) {
         if (filterType === 'custom' && customStartDate && customEndDate) {
-          const startMs = customStartDate.getTime();
-          const endMs = customEndDate.getTime();
+          const startMs = startOfDay(parse(customStartDate, 'yyyy-MM-dd', new Date())).getTime();
+          const endMs = endOfDay(parse(customEndDate, 'yyyy-MM-dd', new Date())).getTime();
           if (l.timestamp < startMs || l.timestamp > endMs) {
             return false;
           }
