@@ -2438,7 +2438,6 @@ export default function App() {
         client.email.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
         client.telefone.includes(deferredSearchTerm);
       
-      const matchesStatus = statusFilter.length === 0 || statusFilter.includes('all') || statusFilter.includes(client.status);
       const matchesTag = tagFilter.length === 0 || tagFilter.includes('all') || tagFilter.some(tf => {
         if (tf === 'enviar_msg' || tf === 'enviar msg') {
           return tag === null;
@@ -2446,23 +2445,128 @@ export default function App() {
         return tag === tf;
       });
 
-      const matchesProduct = productFilter.length === 0 || productFilter.includes('all') || (
-        client.leads.some(l => l.produto && productFilter.includes(l.produto.trim())) ||
-        (client.manualSales || []).some(ms => ms.productName && productFilter.includes(ms.productName.trim()))
-      );
+      const hasProductFilter = productFilter.length > 0 && !productFilter.includes('all');
+      const hasStatusFilter = statusFilter.length > 0 && !statusFilter.includes('all');
+      const hasDateFilter = filterType !== 'all';
 
-      let matchesDate = true;
-      if (filterType !== 'all') {
-        if (filterType === 'custom' && (!customStartDate || !customEndDate)) {
-          matchesDate = true;
-        } else {
-          matchesDate = client.leads.some(l => {
-            return l.timestamp >= startMs && l.timestamp <= endMs;
+      let matchesFilters = true;
+
+      if (hasProductFilter || hasStatusFilter || hasDateFilter) {
+        // Find if there is any lead that matches ALL active criteria
+        const hasMatchingLead = client.leads.some(l => {
+          if (isObsoleteLead(l, client.leads)) {
+            return false;
+          }
+          
+          if (hasProductFilter) {
+            if (!l.produto || !productFilter.includes(l.produto.trim())) {
+              return false;
+            }
+          }
+          if (hasStatusFilter) {
+            if (!l.status || !statusFilter.includes(l.status)) {
+              return false;
+            }
+          }
+          if (hasDateFilter) {
+            if (filterType === 'custom' && customStartDate && customEndDate) {
+              const sMs = startOfDay(parse(customStartDate, 'yyyy-MM-dd', new Date())).getTime();
+              const eMs = endOfDay(parse(customEndDate, 'yyyy-MM-dd', new Date())).getTime();
+              if (l.timestamp < sMs || l.timestamp > eMs) {
+                return false;
+              }
+            } else {
+              let s: Date | null = null;
+              let e: Date | null = null;
+              const n = new Date();
+              if (filterType === 'today') {
+                s = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 0, 0, 0);
+                e = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59);
+              } else if (filterType === 'week') {
+                s = new Date(n.getTime() - 7 * 24 * 60 * 60 * 1000);
+                e = n;
+              } else if (filterType === 'month') {
+                s = new Date(n.getTime() - 30 * 24 * 60 * 60 * 1000);
+                e = n;
+              }
+              if (s && e) {
+                if (l.timestamp < s.getTime() || l.timestamp > e.getTime()) {
+                  return false;
+                }
+              }
+            }
+          }
+          return true;
+        });
+
+        let hasMatchingManualSale = false;
+        if (client.manualSales && client.manualSales.length > 0) {
+          hasMatchingManualSale = client.manualSales.some(ms => {
+            if (hasProductFilter) {
+              if (!ms.productName || !productFilter.includes(ms.productName.trim())) {
+                return false;
+              }
+            }
+            if (hasStatusFilter) {
+              // Manual sales are always Aprovado
+              if (!statusFilter.includes('Aprovado')) {
+                return false;
+              }
+            }
+            if (hasDateFilter) {
+              let ts = 0;
+              if (ms.date) {
+                const combined = ms.time ? `${ms.date.trim()} ${ms.time.trim()}` : ms.date.trim();
+                try {
+                  const parsed = parse(combined, 'yyyy-MM-dd HH:mm', new Date());
+                  if (!isNaN(parsed.getTime())) {
+                    ts = parsed.getTime();
+                  } else {
+                    const fallback = new Date(ms.date);
+                    if (!isNaN(fallback.getTime())) {
+                      ts = fallback.getTime();
+                    }
+                  }
+                } catch (e) {
+                  const fallback = new Date(ms.date);
+                  if (!isNaN(fallback.getTime())) {
+                    ts = fallback.getTime();
+                  }
+                }
+              }
+              if (ts > 0) {
+                if (filterType === 'custom' && customStartDate && customEndDate) {
+                  const sMs = startOfDay(parse(customStartDate, 'yyyy-MM-dd', new Date())).getTime();
+                  const eMs = endOfDay(parse(customEndDate, 'yyyy-MM-dd', new Date())).getTime();
+                  if (ts < sMs || ts > eMs) return false;
+                } else {
+                  let s: Date | null = null;
+                  let e: Date | null = null;
+                  const n = new Date();
+                  if (filterType === 'today') {
+                    s = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 0, 0, 0);
+                    e = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 23, 59, 59);
+                  } else if (filterType === 'week') {
+                    s = new Date(n.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    e = n;
+                  } else if (filterType === 'month') {
+                    s = new Date(n.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    e = n;
+                  }
+                  if (s && e) {
+                    if (ts < s.getTime() || ts > e.getTime()) return false;
+                  }
+                }
+              }
+            }
+            return true;
           });
         }
+
+        matchesFilters = hasMatchingLead || hasMatchingManualSale;
       }
-      
-      return matchesSearch && matchesStatus && matchesTag && matchesProduct && matchesDate;
+
+      return matchesSearch && matchesTag && matchesFilters;
     });
   }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, productFilter, clientTags, showOnlyManualSales, manualSales]);
 
