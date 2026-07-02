@@ -536,19 +536,102 @@ const cleanCustomerName = (name: string, email?: string): string => {
   return trimmed;
 };
 
+const normalizeProductName = (name: string): string => {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[-_()[\]]/g, " ") // replace hyphens and brackets with spaces
+    .replace(/\s+/g, " ") // collapse spaces
+    .trim();
+};
+
+const parseDateTime = (dateStr: string, timeStr: string): Date | null => {
+  if (!dateStr) return null;
+  const combined = timeStr ? `${dateStr.trim()} ${timeStr.trim()}` : dateStr.trim();
+  
+  // Try standard Date constructor (handles ISO, yyyy-MM-dd, etc.)
+  let d = new Date(combined);
+  if (!isNaN(d.getTime())) return d;
+  
+  // Try dd/MM/yyyy HH:mm:ss
+  try {
+    d = parse(combined, 'dd/MM/yyyy HH:mm:ss', new Date());
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {}
+  
+  // Try dd/MM/yyyy HH:mm
+  try {
+    d = parse(combined, 'dd/MM/yyyy HH:mm', new Date());
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {}
+
+  // Try dd/MM/yyyy
+  try {
+    d = parse(combined, 'dd/MM/yyyy', new Date());
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {}
+
+  // Try yyyy-MM-dd HH:mm:ss
+  try {
+    d = parse(combined, 'yyyy-MM-dd HH:mm:ss', new Date());
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {}
+
+  // Try yyyy-MM-dd HH:mm
+  try {
+    d = parse(combined, 'yyyy-MM-dd HH:mm', new Date());
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {}
+
+  // Manual fallback parse for dd/MM/yyyy
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      let hour = 0, minute = 0, second = 0;
+      if (timeStr) {
+        const tParts = timeStr.split(':');
+        if (tParts.length >= 2) {
+          hour = parseInt(tParts[0], 10);
+          minute = parseInt(tParts[1], 10);
+          if (tParts.length >= 3) {
+            second = parseInt(tParts[2], 10);
+          }
+        }
+      }
+      d = new Date(year, month, day, hour, minute, second);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+
+  return null;
+};
+
 const isObsoleteLead = (lead: Lead, allLeads: Lead[]): boolean => {
   if (lead.status === 'Aprovado' || lead.status === 'Reembolsado') {
     return false;
   }
   
+  const normLeadProd = normalizeProductName(lead.produto || "");
+  
   // An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product
   // that was created at the same time or later (or within 2 hours before, to handle slight clock issues).
-  const hasApprovedSameProduct = allLeads.some(l => 
-    l.status === 'Aprovado' && 
-    l.produto && lead.produto && 
-    l.produto.toLowerCase().trim() === lead.produto.toLowerCase().trim() &&
-    l.timestamp >= lead.timestamp - 7200000
-  );
+  const hasApprovedSameProduct = allLeads.some(l => {
+    if (l.status !== 'Aprovado') return false;
+    
+    const normLProd = normalizeProductName(l.produto || "");
+    const sameProduct = normLeadProd === normLProd || 
+                        (normLeadProd && normLProd && (normLeadProd.includes(normLProd) || normLProd.includes(normLeadProd)));
+                        
+    if (!sameProduct) return false;
+    
+    // Check if approved lead is newer or close in time (within 2 hours before, or anytime after)
+    return l.timestamp >= lead.timestamp - 7200000;
+  });
   
   return hasApprovedSameProduct;
 };
@@ -557,23 +640,31 @@ const determineActiveStatus = (leads: Lead[]): string => {
   if (!leads || leads.length === 0) return 'Sem status';
   
   // Filter out obsolete leads before determining status!
-  // A lead is obsolete if it's unpaid and there's an 'Aprovado' lead for the same product.
   const activeLeads = leads.filter(lead => !isObsoleteLead(lead, leads));
   const targetLeads = activeLeads.length > 0 ? activeLeads : leads;
   
-  const sorted = [...targetLeads].sort((a, b) => b.timestamp - a.timestamp);
+  const sorted = [...targetLeads].sort((a, b) => {
+    if (b.timestamp !== a.timestamp) {
+      return b.timestamp - a.timestamp;
+    }
+    return (b.rowNumber || 0) - (a.rowNumber || 0);
+  });
+  
   const mostRecent = sorted[0];
   
   if (sorted.length === 1) return mostRecent.status;
   
   // Find leads belonging to the SAME checkout session as the most recent checkout:
   // - Same non-empty codPay, OR
-  // - Same product name AND timeframe <= 2 hours (7200000 ms)
+  // - Same product name (fuzzy match) AND timeframe <= 2 hours (7200000 ms)
+  const normMostRecentProd = normalizeProductName(mostRecent.produto || "");
   const sessionLeads = sorted.filter(l => {
     if (mostRecent.codPay && l.codPay && mostRecent.codPay === l.codPay) {
       return true;
     }
-    const isSameProduct = mostRecent.produto && l.produto && mostRecent.produto.toLowerCase().trim() === l.produto.toLowerCase().trim();
+    const normLProd = normalizeProductName(l.produto || "");
+    const isSameProduct = normMostRecentProd === normLProd || 
+                          (normMostRecentProd && normLProd && (normMostRecentProd.includes(normLProd) || normLProd.includes(normMostRecentProd)));
     const isCloseInTime = Math.abs(mostRecent.timestamp - l.timestamp) <= 7200000;
     return isSameProduct && isCloseInTime;
   });
@@ -1950,17 +2041,11 @@ export default function App() {
             const dateStr = row['data'] || '';
             const timeStr = row['hora'] || '';
             let timestamp = 0;
-            try {
-              if (dateStr && timeStr) {
-                // Formatting date and time
-                let parsedDate = parse(`${dateStr} ${timeStr}`, 'dd/MM/yyyy HH:mm:ss', new Date());
-                if (isNaN(getTime(parsedDate))) {
-                  parsedDate = parse(`${dateStr} ${timeStr}`, 'dd/MM/yyyy HH:mm', new Date());
-                }
-                timestamp = isNaN(getTime(parsedDate)) ? 0 : getTime(parsedDate);
+            if (dateStr) {
+              const parsed = parseDateTime(dateStr, timeStr);
+              if (parsed) {
+                timestamp = parsed.getTime();
               }
-            } catch (e) {
-              timestamp = 0;
             }
 
             const rawValor = row['valor'] || row['vlr'] || '0';
