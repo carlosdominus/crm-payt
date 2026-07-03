@@ -650,6 +650,163 @@ const isObsoleteLead = (lead: Lead, allLeads: Lead[]): boolean => {
   return hasApprovedSameProduct;
 };
 
+const dddToState: Record<string, string> = {
+  '11': 'SP', '12': 'SP', '13': 'SP', '14': 'SP', '15': 'SP', '16': 'SP', '17': 'SP', '18': 'SP', '19': 'SP',
+  '21': 'RJ', '22': 'RJ', '24': 'RJ',
+  '27': 'ES', '28': 'ES',
+  '31': 'MG', '32': 'MG', '33': 'MG', '34': 'MG', '35': 'MG', '37': 'MG', '38': 'MG',
+  '41': 'PR', '42': 'PR', '43': 'PR', '44': 'PR', '45': 'PR', '46': 'PR',
+  '47': 'SC', '48': 'SC', '49': 'SC',
+  '51': 'RS', '53': 'RS', '54': 'RS', '55': 'RS',
+  '61': 'DF',
+  '62': 'GO', '64': 'GO',
+  '63': 'TO',
+  '65': 'MT', '66': 'MT',
+  '67': 'MS',
+  '68': 'AC',
+  '69': 'RO',
+  '71': 'BA', '73': 'BA', '74': 'BA', '75': 'BA', '77': 'BA',
+  '79': 'SE',
+  '81': 'PE', '87': 'PE',
+  '82': 'AL',
+  '83': 'PB',
+  '84': 'RN',
+  '85': 'CE', '88': 'CE',
+  '86': 'PI', '89': 'PI',
+  '91': 'PA', '93': 'PA', '94': 'PA',
+  '92': 'AM', '97': 'AM',
+  '95': 'RR',
+  '96': 'AP',
+  '98': 'MA', '99': 'MA'
+};
+
+const getBrazilianStateFromPhone = (phone: string | undefined | null): string => {
+  if (!phone) return 'Outro';
+  const digits = phone.replace(/\D/g, '');
+  let ddd = '';
+  if (digits.startsWith('55') && digits.length >= 12) {
+    ddd = digits.slice(2, 4);
+  } else if (digits.length >= 10) {
+    ddd = digits.slice(0, 2);
+  } else {
+    return 'Outro';
+  }
+  return dddToState[ddd] || 'Outro';
+};
+
+const normalizeName = (name: string): string => {
+  if (!name) return '';
+  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+};
+
+const getFirstName = (fullName: string | undefined | null): string => {
+  if (!fullName) return '';
+  const trimmed = fullName.trim();
+  if (!trimmed) return '';
+  const firstWord = trimmed.split(/[\s,.-]+/)[0];
+  return normalizeName(firstWord);
+};
+
+const predictGenderFromName = (fullName: string | undefined | null): 'Masculino' | 'Feminino' | 'Indefinido' => {
+  const firstName = getFirstName(fullName);
+  if (!firstName || firstName.length < 2) return 'Indefinido';
+
+  // Specific high-frequency exceptions or exact matches:
+  const exactFemales = new Set([
+    'alice', 'beatriz', 'yasmin', 'iasmin', 'isis', 'ellen', 'helen', 'evelyn', 'karen', 'carmen', 
+    'raquel', 'abigail', 'ines', 'ester', 'nicole', 'miriam', 'vivian', 'ruth', 'iris', 'sueli', 
+    'rose', 'solange', 'denise', 'gisele', 'michele', 'michelle', 'simone', 'caroline', 'elaine', 
+    'irene', 'lourdes', 'nair', 'cleide', 'kelly', 'joyce', 'elis', 'elisabete', 'bete', 'elizabete', 
+    'rute', 'carol', 'iane', 'daiane', 'tatiane', 'cristiane', 'rosane', 'eliane', 'viviane', 
+    'lidiane', 'gislaine', 'leidiane', 'josiane', 'valdirene', 'lucilene', 'marilene', 'terezinha',
+    'isabel', 'ariane', 'mariane', 'andriele', 'gabriele', 'emmanuele', 'emanuele', 'isabelle',
+    'shirley', 'rosemary', 'janete', 'ivete', 'margarete', 'clarice', 'cleusa', 'mariza', 'luiza'
+  ]);
+
+  const exactMales = new Set([
+    'joao', 'jose', 'felipe', 'andre', 'alexandre', 'henrique', 'guilherme', 'gabriel', 'lucas', 
+    'mateus', 'matheus', 'marcos', 'pedro', 'carlos', 'thiago', 'tiago', 'rodrigo', 'bruno', 
+    'daniel', 'diego', 'rafael', 'leonardo', 'gustavo', 'marcelo', 'fernando', 'ricardo', 
+    'luiz', 'luis', 'vitor', 'victor', 'igor', 'arthur', 'artur', 'hugo', 'otavio', 'caio', 
+    'renato', 'samuel', 'eduardo', 'jorge', 'paulo', 'antonio', 'francisco', 'roberto', 'fabio', 
+    'alex', 'alan', 'willian', 'william', 'washington', 'wellington', 'jefferson', 'anderson', 
+    'robson', 'cleiton', 'everton', 'peterson', 'ederson', 'nilson', 'nelson', 'wilson', 
+    'marlon', 'valdir', 'waldir', 'vanderlei', 'wanderley', 'claudio', 'mauricio', 'rogerio', 
+    'fabricio', 'marcio', 'juliano', 'adriano', 'murilo', 'danilo', 'saulo', 'breno', 'diogo', 
+    'iago', 'yago', 'samir', 'itamar', 'moises', 'isaque', 'isaac', 'abner', 'calebe', 'jonas', 
+    'elias', 'davi', 'david', 'levi', 'enzo', 'noah', 'lucca', 'luca', 'theo', 'teo', 'heitor', 
+    'bernardo', 'miguel', 'ravi', 'gael', 'ruan', 'vini', 'vinicius', 'yuri', 'caua', 'kaue', 
+    'kauan', 'jean', 'christian', 'jonathan', 'nathan', 'ryan', 'bryan', 'kevin', 'gerson',
+    'robson', 'jackson', 'harrison', 'alisson', 'alison', 'alysson', 'claudinei', 'sidney',
+    'wesley', 'andrey', 'valdey', 'kaiky', 'henry', 'giovanni', 'luigi', 'regis', 'clovis', 
+    'denis', 'elvis', 'valdemar', 'valdemir', 'ademir', 'gilmar', 'waldemir', 'neymar', 
+    'roger', 'jader', 'cleber', 'kleber', 'cesar', 'julio', 'joaquim', 'valentim', 'alef', 
+    'crispim', 'ariel', 'joel', 'leonel', 'abel', 'ezequiel', 'israel', 'nataniel', 'manoel', 
+    'manuel'
+  ]);
+
+  if (exactFemales.has(firstName)) return 'Feminino';
+  if (exactMales.has(firstName)) return 'Masculino';
+
+  // Substring / suffix heuristics:
+  // 1. Female markers
+  if (firstName.endsWith('a')) {
+    // some rare male names end in a
+    if (['luca', 'lucca', 'andrea', 'joshua', 'sasha', 'nicola', 'gianluca'].includes(firstName)) {
+      return 'Masculino';
+    }
+    return 'Feminino';
+  }
+
+  if (
+    firstName.endsWith('ice') ||
+    firstName.endsWith('ite') ||
+    firstName.endsWith('ine') ||
+    firstName.endsWith('ane') ||
+    firstName.endsWith('ene') ||
+    firstName.endsWith('ele') ||
+    firstName.endsWith('elle') ||
+    firstName.endsWith('eth') ||
+    firstName.endsWith('ete') ||
+    firstName.endsWith('ina') ||
+    firstName.endsWith('isabelle') ||
+    firstName.endsWith('kelly') ||
+    firstName.endsWith('ely') ||
+    firstName.endsWith('yasmine') ||
+    firstName.endsWith('beatrice')
+  ) {
+    return 'Feminino';
+  }
+
+  // 2. Male markers
+  if (
+    firstName.endsWith('o') ||
+    firstName.endsWith('os') ||
+    firstName.endsWith('us') ||
+    firstName.endsWith('as') ||
+    firstName.endsWith('on') ||
+    firstName.endsWith('am') ||
+    firstName.endsWith('an') ||
+    firstName.endsWith('el') ||
+    firstName.endsWith('er') ||
+    firstName.endsWith('ar') ||
+    firstName.endsWith('ir') ||
+    firstName.endsWith('ur') ||
+    firstName.endsWith('im') ||
+    firstName.endsWith('es') ||
+    firstName.endsWith('ey') ||
+    firstName.endsWith('ei')
+  ) {
+    // Check some female endings that might clash
+    if (['raquel', 'isabel', 'nair', 'ester', 'miriam', 'vivian'].includes(firstName)) {
+      return 'Feminino';
+    }
+    return 'Masculino';
+  }
+
+  return 'Indefinido';
+};
+
 const determineActiveStatus = (leads: Lead[]): string => {
   if (!leads || leads.length === 0) return 'Sem status';
   
@@ -1230,6 +1387,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [productFilter, setProductFilter] = useState<string[]>([]);
+  const [stateFilter, setStateFilter] = useState<string[]>([]);
+  const [genderFilter, setGenderFilter] = useState<string[]>([]);
   const [showOnlyManualSales, setShowOnlyManualSales] = useState(false);
   const [showUtms, setShowUtms] = useState(false);
 
@@ -2437,6 +2596,12 @@ export default function App() {
         client.nome.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
         client.email.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
         client.telefone.includes(deferredSearchTerm);
+
+      const clientState = getBrazilianStateFromPhone(client.telefone);
+      const matchesState = stateFilter.length === 0 || stateFilter.includes('all') || stateFilter.includes(clientState);
+
+      const clientGender = predictGenderFromName(client.nome);
+      const matchesGender = genderFilter.length === 0 || genderFilter.includes(clientGender);
       
       const matchesTag = tagFilter.length === 0 || tagFilter.includes('all') || tagFilter.some(tf => {
         if (tf === 'enviar_msg' || tf === 'enviar msg') {
@@ -2566,9 +2731,9 @@ export default function App() {
         matchesFilters = hasMatchingLead || hasMatchingManualSale;
       }
 
-      return matchesSearch && matchesTag && matchesFilters;
+      return matchesSearch && matchesTag && matchesFilters && matchesState && matchesGender;
     });
-  }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, productFilter, clientTags, showOnlyManualSales, manualSales]);
+  }, [enrichedClients, deferredSearchTerm, filterType, customStartDate, customEndDate, statusFilter, tagFilter, productFilter, stateFilter, genderFilter, clientTags, showOnlyManualSales, manualSales]);
 
   const getClientDisplayLead = useCallback((client: Client) => {
     if (!client.leads || client.leads.length === 0) return null;
@@ -2724,6 +2889,34 @@ export default function App() {
       });
     });
     return Array.from(products).sort();
+  }, [enrichedClients]);
+
+  const uniqueStates = useMemo(() => {
+    const counts: Record<string, number> = {};
+    enrichedClients.forEach(client => {
+      const state = getBrazilianStateFromPhone(client.telefone);
+      counts[state] = (counts[state] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([state, count]) => ({ state, count }))
+      .sort((a, b) => {
+        if (a.state === 'Outro') return 1;
+        if (b.state === 'Outro') return -1;
+        return a.state.localeCompare(b.state);
+      });
+  }, [enrichedClients]);
+
+  const genderCounts = useMemo(() => {
+    let mCount = 0;
+    let fCount = 0;
+    let iCount = 0;
+    enrichedClients.forEach(client => {
+      const g = predictGenderFromName(client.nome);
+      if (g === 'Masculino') mCount++;
+      else if (g === 'Feminino') fCount++;
+      else iCount++;
+    });
+    return { Masculino: mCount, Feminino: fCount, Indefinido: iCount };
   }, [enrichedClients]);
 
   const followupClients = useMemo(() => {
@@ -4108,7 +4301,7 @@ export default function App() {
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                className="absolute right-0 mt-3 w-80 bg-white border border-modern-border rounded-xl shadow-2xl z-[70] overflow-hidden p-4 space-y-6"
+                                className="absolute right-0 mt-3 w-80 bg-white border border-modern-border rounded-xl shadow-2xl z-[70] p-4 space-y-6 max-h-[80vh] overflow-y-auto scrollbar-thin"
                               >
                       {/* Período */}
                       <div className="space-y-2">
@@ -4290,6 +4483,100 @@ export default function App() {
                               </button>
                             );
                           })}
+                        </div>
+                      </div>
+
+                      {/* Estados (UF) */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Estados (UF)</p>
+                        <div className="max-h-40 overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-slate-200">
+                          <button
+                            onClick={() => setStateFilter([])}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
+                              stateFilter.length === 0
+                                ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                            )}
+                          >
+                            Todos os Estados {stateFilter.length > 0 ? `(${stateFilter.length} selecionados)` : "• Ativo"}
+                          </button>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {uniqueStates.map(({ state, count }) => {
+                              const isSelected = stateFilter.includes(state);
+                              return (
+                                <button
+                                  key={state}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setStateFilter(prev => prev.filter(s => s !== state));
+                                    } else {
+                                      setStateFilter(prev => [...prev, state]);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "text-center px-1.5 py-1.5 rounded-md text-[11px] font-bold transition-colors border flex flex-col justify-center items-center gap-0.5",
+                                    isSelected
+                                      ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                      : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                                  )}
+                                  title={`${state}: ${count} clientes`}
+                                >
+                                  <span className="text-xs">{state}</span>
+                                  <span className="text-[8px] opacity-60 font-medium">({count})</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Gênero */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Gênero (Previsão por Nome)</p>
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => setGenderFilter([])}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-md text-[11px] font-bold transition-colors border",
+                              genderFilter.length === 0
+                                ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                            )}
+                          >
+                            Todos os Gêneros {genderFilter.length > 0 ? `(${genderFilter.length} selecionados)` : "• Ativo"}
+                          </button>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[
+                              { label: 'Masculino', value: 'Masculino', count: genderCounts.Masculino },
+                              { label: 'Feminino', value: 'Feminino', count: genderCounts.Feminino },
+                              { label: 'Indefinido', value: 'Indefinido', count: genderCounts.Indefinido }
+                            ].map(({ label, value, count }) => {
+                              const isSelected = genderFilter.includes(value);
+                              return (
+                                <button
+                                  key={value}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setGenderFilter(prev => prev.filter(g => g !== value));
+                                    } else {
+                                      setGenderFilter(prev => [...prev, value]);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "text-center px-1 py-1.5 rounded-md text-[11px] font-bold transition-colors border flex flex-col justify-center items-center gap-0.5",
+                                    isSelected
+                                      ? "bg-modern-primary/10 border-modern-primary/20 text-modern-primary font-extrabold"
+                                      : "bg-white border-modern-border text-modern-text hover:bg-slate-50"
+                                  )}
+                                  title={`${label}: ${count} clientes`}
+                                >
+                                  <span className="text-[10px] truncate max-w-full">{label}</span>
+                                  <span className="text-[8px] opacity-60 font-medium">({count})</span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
 
@@ -4552,7 +4839,32 @@ export default function App() {
                               {client.nome.charAt(0)}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-normal text-[#202124] truncate">{client.nome}</p>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <p className="text-xs font-normal text-[#202124] truncate">{client.nome}</p>
+                                {(() => {
+                                  const gender = predictGenderFromName(client.nome);
+                                  if (gender === 'Masculino') {
+                                    return (
+                                      <span 
+                                        className="px-1 py-0.5 rounded text-[8px] font-black bg-blue-50 text-blue-600 border border-blue-100 uppercase tracking-wider shrink-0"
+                                        title="Gênero previsto: Masculino"
+                                      >
+                                        M
+                                      </span>
+                                    );
+                                  } else if (gender === 'Feminino') {
+                                    return (
+                                      <span 
+                                        className="px-1 py-0.5 rounded text-[8px] font-black bg-pink-50 text-pink-600 border border-pink-100 uppercase tracking-wider shrink-0"
+                                        title="Gênero previsto: Feminino"
+                                      >
+                                        F
+                                      </span>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
                             </div>
                             <button
                               onClick={(e) => {
@@ -4570,6 +4882,28 @@ export default function App() {
                           <div className="flex items-center justify-between group/phone">
                             <p className="text-xs font-normal text-[#3c4043] flex items-center gap-1.5">
                               <Phone size={11} className="text-[#5f6368]" /> {client.telefone || <span className="text-rose-400 italic text-[9px]">Sem número</span>}
+                              {client.telefone && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const state = getBrazilianStateFromPhone(client.telefone);
+                                    if (stateFilter.includes(state)) {
+                                      setStateFilter(prev => prev.filter(s => s !== state));
+                                    } else {
+                                      setStateFilter(prev => [...prev, state]);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "ml-1.5 px-1.5 py-0.5 border rounded text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs",
+                                    stateFilter.includes(getBrazilianStateFromPhone(client.telefone))
+                                      ? "bg-modern-primary text-white border-modern-primary"
+                                      : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                                  )}
+                                  title={`Filtrar apenas por clientes de ${getBrazilianStateFromPhone(client.telefone)} (clique para ativar/desativar)`}
+                                >
+                                  {getBrazilianStateFromPhone(client.telefone)}
+                                </button>
+                              )}
                             </p>
                             {client.telefone && (
                               <button
