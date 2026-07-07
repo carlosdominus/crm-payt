@@ -931,8 +931,36 @@ export default function App() {
     origin: "",
     color: "#25D366",
     phoneNumber: "",
-    identifier: ""
+    identifier: "",
+    isActive: true
   });
+
+  const sortedWhatsappAccounts = useMemo(() => {
+    return [...whatsappAccounts].sort((a, b) => {
+      const idA = parseInt(a.identifier, 10);
+      const idB = parseInt(b.identifier, 10);
+      if (!isNaN(idA) && !isNaN(idB)) {
+        return idA - idB;
+      }
+      return (a.identifier || '').localeCompare(b.identifier || '');
+    });
+  }, [whatsappAccounts]);
+
+  const activeWhatsappAccounts = useMemo(() => {
+    return sortedWhatsappAccounts.filter(acc => acc.isActive !== false);
+  }, [sortedWhatsappAccounts]);
+
+  const toggleWhatsappActive = async (acc: WhatsAppAccount) => {
+    if (!user || !effectiveWorkspaceId) return;
+    try {
+      const nextActive = acc.isActive === false ? true : false;
+      await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, acc.id), {
+        isActive: nextActive
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${effectiveWorkspaceId}/whatsappAccounts/${acc.id}`);
+    }
+  };
 
   useEffect(() => {
     setIsEditingClientDetails(false);
@@ -1512,6 +1540,7 @@ export default function App() {
     const id = (whatsappForm as any).id || Math.random().toString(36).substr(2, 9);
     const newAcc: WhatsAppAccount = {
       ...whatsappForm,
+      isActive: (whatsappForm as any).isActive ?? true,
       id
     } as WhatsAppAccount;
 
@@ -1519,13 +1548,14 @@ export default function App() {
       await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, id), {
         ...newAcc,
         createdAt: new Date().toISOString()
-      });
+      }, { merge: true });
       setWhatsappForm({
         name: "",
         origin: "",
         color: "#25D366",
         phoneNumber: "",
-        identifier: ""
+        identifier: "",
+        isActive: true
       });
       // Don't close immediately so user can see it's done if they have more to add? 
       // Actually common pattern is to just keep it open or show success.
@@ -5955,6 +5985,18 @@ export default function App() {
                         className="w-full bg-slate-50 border border-modern-border px-3 py-2.5 text-xs font-bold text-modern-text focus:outline-none"
                       />
                     </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input 
+                        type="checkbox"
+                        id="isActiveCheckbox"
+                        checked={whatsappForm.isActive}
+                        onChange={(e) => setWhatsappForm({ ...whatsappForm, isActive: e.target.checked })}
+                        className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                      />
+                      <label htmlFor="isActiveCheckbox" className="text-[10px] font-bold uppercase text-modern-text cursor-pointer">
+                        Conta Ativa (disponível para novos leads)
+                      </label>
+                    </div>
                     <div className="flex flex-col gap-2 pt-2">
                       <button 
                         onClick={saveWhatsappAccount}
@@ -5970,7 +6012,7 @@ export default function App() {
                       </button>
                       {(whatsappForm as any).id && (
                         <button 
-                          onClick={() => setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "" })}
+                          onClick={() => setWhatsappForm({ name: "", origin: "", color: "#25D366", phoneNumber: "", identifier: "", isActive: true })}
                           className="w-full bg-slate-100 text-modern-secondary py-3 font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
                         >
                           Cancelar Edição
@@ -5982,10 +6024,16 @@ export default function App() {
 
                 {/* Right: List */}
                 <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
-                  <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest mb-6">Contas Ativas ({whatsappAccounts.length})</h4>
+                  <div className="flex items-center justify-between mb-6">
+                    <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest">Contas Cadastradas ({sortedWhatsappAccounts.length})</h4>
+                    <span className="text-[10px] font-bold text-modern-secondary">{activeWhatsappAccounts.length} ativas</span>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
-                    {whatsappAccounts.map(acc => (
-                      <div key={acc.id} className="bg-white border border-modern-border p-5 shadow-sm group hover:border-emerald-500/50 transition-all flex flex-col min-h-[140px]">
+                    {sortedWhatsappAccounts.map(acc => (
+                      <div key={acc.id} className={cn(
+                        "bg-white border p-5 shadow-sm group transition-all flex flex-col min-h-[140px]",
+                        acc.isActive !== false ? "border-modern-border hover:border-emerald-500/50" : "border-slate-300 bg-slate-50/60 opacity-80"
+                      )}>
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-4 min-w-0 flex-1">
                             <div 
@@ -5995,13 +6043,31 @@ export default function App() {
                               <span className="text-[11px] font-black">{acc.identifier}</span>
                             </div>
                             <div className="min-w-0 flex-1 pr-2">
-                              <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight mb-1">{acc.name}</p>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight">{acc.name}</p>
+                                <span className={cn(
+                                  "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0",
+                                  acc.isActive !== false ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-slate-200 text-slate-600 border border-slate-300"
+                                )}>
+                                  {acc.isActive !== false ? "Ativa" : "Inativa"}
+                                </span>
+                              </div>
                               <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                          <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                            <button
+                              onClick={() => toggleWhatsappActive(acc)}
+                              className={cn(
+                                "px-2 py-1.5 text-[9px] font-black uppercase tracking-wider rounded border transition-all",
+                                acc.isActive !== false ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                              )}
+                              title={acc.isActive !== false ? "Inativar conta" : "Ativar conta"}
+                            >
+                              {acc.isActive !== false ? "Inativar" : "Ativar"}
+                            </button>
                             <button 
-                              onClick={() => setWhatsappForm(acc as any)}
+                              onClick={() => setWhatsappForm({ ...acc, isActive: acc.isActive !== false } as any)}
                               className="w-9 h-9 flex items-center justify-center text-modern-secondary hover:text-emerald-600 bg-slate-50 hover:bg-emerald-50 border border-modern-border transition-all"
                               title="Editar"
                             >
@@ -6025,7 +6091,7 @@ export default function App() {
                         )}
                       </div>
                     ))}
-                    {whatsappAccounts.length === 0 && (
+                    {sortedWhatsappAccounts.length === 0 && (
                       <div className="col-span-full text-center py-20 opacity-40">
                         <Phone size={48} className="mx-auto mb-4 text-modern-secondary" />
                         <p className="text-xs font-bold uppercase tracking-widest text-modern-secondary italic">Nenhuma conta cadastrada</p>
