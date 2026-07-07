@@ -4821,7 +4821,7 @@ export default function App() {
                                       Remover Atribuição
                                     </button>
                                   )}
-                                  {whatsappAccounts.map(acc => (
+                                  {activeWhatsappAccounts.map(acc => (
                                     <button 
                                       key={acc.id}
                                       onClick={(e) => {
@@ -4842,7 +4842,7 @@ export default function App() {
                                       </div>
                                     </button>
                                   ))}
-                                  {whatsappAccounts.length === 0 && (
+                                  {activeWhatsappAccounts.length === 0 && (
                                     <div className="px-4 py-8 text-[10px] text-modern-secondary text-center italic font-bold bg-slate-50/50 uppercase tracking-widest">
                                       Nenhum Zap cadastrado.
                                     </div>
