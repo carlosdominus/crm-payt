@@ -892,6 +892,73 @@ export default function App() {
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  interface SavedFilter {
+    id: string;
+    name: string;
+    filterType: string;
+    customStartDate: string;
+    customEndDate: string;
+    statusFilter: string[];
+    tagFilter: string[];
+    productFilter: string[];
+    stateFilter: string[];
+    genderFilter: string[];
+    showOnlyManualSales: boolean;
+  }
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(() => {
+    try {
+      const saved = localStorage.getItem('crm_saved_filters');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newFilterName, setNewFilterName] = useState("");
+
+  const saveCurrentFilter = () => {
+    if (!newFilterName.trim()) {
+      alert("Digite um nome para o filtro salvo.");
+      return;
+    }
+    const newFilter: SavedFilter = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: newFilterName.trim(),
+      filterType,
+      customStartDate,
+      customEndDate,
+      statusFilter,
+      tagFilter,
+      productFilter,
+      stateFilter,
+      genderFilter,
+      showOnlyManualSales
+    };
+    const updated = [...savedFilters, newFilter];
+    setSavedFilters(updated);
+    localStorage.setItem('crm_saved_filters', JSON.stringify(updated));
+    setNewFilterName("");
+  };
+
+  const applySavedFilter = (sf: SavedFilter) => {
+    setFilterType(sf.filterType as any);
+    setCustomStartDate(sf.customStartDate || "");
+    setCustomEndDate(sf.customEndDate || "");
+    setStatusFilter(sf.statusFilter || []);
+    setTagFilter(sf.tagFilter || []);
+    setProductFilter(sf.productFilter || []);
+    setStateFilter(sf.stateFilter || []);
+    setGenderFilter(sf.genderFilter || []);
+    setShowOnlyManualSales(!!sf.showOnlyManualSales);
+    setShowFilterMenu(false);
+  };
+
+  const deleteSavedFilter = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = savedFilters.filter(f => f.id !== id);
+    setSavedFilters(updated);
+    localStorage.setItem('crm_saved_filters', JSON.stringify(updated));
+  };
   const [showSettings, setShowSettings] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'partners'>('general');
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('crm_webhook_url') || "");
@@ -4333,6 +4400,48 @@ export default function App() {
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
                                 className="absolute right-0 mt-3 w-80 bg-white border border-modern-border rounded-xl shadow-2xl z-[70] p-4 space-y-6 max-h-[80vh] overflow-y-auto scrollbar-thin"
                               >
+                      {/* Filtros Salvos / Favoritos */}
+                      <div className="space-y-2 pb-4 border-b border-modern-border">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Filtros Salvos (Favoritos)</p>
+                        <div className="flex gap-1.5">
+                          <input 
+                            type="text"
+                            placeholder="Nome para salvar filtro..."
+                            value={newFilterName}
+                            onChange={(e) => setNewFilterName(e.target.value)}
+                            className="flex-1 bg-slate-50 border border-modern-border rounded px-2.5 py-1.5 text-[11px] font-medium text-modern-text focus:outline-none"
+                          />
+                          <button
+                            onClick={saveCurrentFilter}
+                            className="bg-modern-primary text-white px-3 py-1.5 rounded text-[11px] font-bold hover:bg-modern-primary/90 transition-all shrink-0"
+                          >
+                            Salvar
+                          </button>
+                        </div>
+                        {savedFilters.length > 0 && (
+                          <div className="space-y-1.5 pt-1 max-h-36 overflow-y-auto">
+                            {savedFilters.map(sf => (
+                              <div key={sf.id} className="flex items-center justify-between bg-slate-50 border border-modern-border rounded px-2.5 py-1.5 hover:bg-slate-100 transition-colors group">
+                                <button
+                                  onClick={() => applySavedFilter(sf)}
+                                  className="text-left text-[11px] font-bold text-modern-text truncate flex-1 pr-2"
+                                  title={`Aplicar filtro: ${sf.name}`}
+                                >
+                                  ⭐ {sf.name}
+                                </button>
+                                <button
+                                  onClick={(e) => deleteSavedFilter(sf.id, e)}
+                                  className="text-slate-400 hover:text-rose-600 transition-colors opacity-0 group-hover:opacity-100 p-0.5"
+                                  title="Excluir filtro salvo"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
                       {/* Período */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-modern-secondary px-1">Período</p>

@@ -560,6 +560,86 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .slice(0, 8);
   }, [filteredSalesForDash, enrichedClients]);
 
+  const stateConversionAnalysis = useMemo(() => {
+    const dddStateMap: Record<string, string> = {
+      '11': 'São Paulo (SP)', '12': 'São Paulo (SP)', '13': 'São Paulo (SP)', '14': 'São Paulo (SP)', '15': 'São Paulo (SP)', '16': 'São Paulo (SP)', '17': 'São Paulo (SP)', '18': 'São Paulo (SP)', '19': 'São Paulo (SP)',
+      '21': 'Rio de Janeiro (RJ)', '22': 'Rio de Janeiro (RJ)', '24': 'Rio de Janeiro (RJ)',
+      '27': 'Espírito Santo (ES)', '28': 'Espírito Santo (ES)',
+      '31': 'Minas Gerais (MG)', '32': 'Minas Gerais (MG)', '33': 'Minas Gerais (MG)', '34': 'Minas Gerais (MG)', '35': 'Minas Gerais (MG)', '37': 'Minas Gerais (MG)', '38': 'Minas Gerais (MG)',
+      '41': 'Paraná (PR)', '42': 'Paraná (PR)', '43': 'Paraná (PR)', '44': 'Paraná (PR)', '45': 'Paraná (PR)', '46': 'Paraná (PR)',
+      '47': 'Santa Catarina (SC)', '48': 'Santa Catarina (SC)', '49': 'Santa Catarina (SC)',
+      '51': 'Rio Grande do Sul (RS)', '53': 'Rio Grande do Sul (RS)', '54': 'Rio Grande do Sul (RS)', '55': 'Rio Grande do Sul (RS)',
+      '61': 'Distrito Federal (DF)',
+      '62': 'Goiás (GO)', '64': 'Goiás (GO)',
+      '63': 'Tocantins (TO)',
+      '65': 'Mato Grosso (MT)', '66': 'Mato Grosso (MT)',
+      '67': 'Mato Grosso do Sul (MS)',
+      '68': 'Acre (AC)',
+      '69': 'Rondônia (RO)',
+      '71': 'Bahia (BA)', '73': 'Bahia (BA)', '74': 'Bahia (BA)', '75': 'Bahia (BA)', '77': 'Bahia (BA)',
+      '79': 'Sergipe (SE)',
+      '81': 'Pernambuco (PE)', '87': 'Pernambuco (PE)',
+      '82': 'Alagoas (AL)',
+      '83': 'Paraíba (PB)',
+      '84': 'Rio Grande do Norte (RN)',
+      '85': 'Ceará (CE)', '88': 'Ceará (CE)',
+      '86': 'Piauí (PI)', '89': 'Piauí (PI)',
+      '91': 'Pará (PA)', '93': 'Pará (PA)', '94': 'Pará (PA)',
+      '92': 'Amazonas (AM)', '97': 'Amazonas (AM)',
+      '95': 'Roraima (RR)',
+      '96': 'Amapá (AP)',
+      '98': 'Maranhão (MA)', '99': 'Maranhão (MA)'
+    };
+    const getLocalFromPhone = (phone: string): string => {
+      if (!phone) return 'Não Especificado';
+      const cleaned = phone.replace(/\D/g, '');
+      let withoutDDI = cleaned;
+      if (cleaned.startsWith('55') && cleaned.length >= 10) {
+        withoutDDI = cleaned.substring(2);
+      }
+      if (withoutDDI.length >= 2) {
+        const ddd = withoutDDI.substring(0, 2);
+        return dddStateMap[ddd] || `Outros (DDD ${ddd})`;
+      }
+      return 'Sem DDD';
+    };
+
+    const stateMap = new Map<string, { stateName: string; contactedLeads: number; salesCount: number; salesValue: number }>();
+
+    filteredClientsForDash.forEach(client => {
+      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+      if (['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag)) {
+        const stateName = getLocalFromPhone(client.telefone);
+        if (stateName && stateName !== 'Não Especificado' && stateName !== 'Sem DDD') {
+          const existing = stateMap.get(stateName) || { stateName, contactedLeads: 0, salesCount: 0, salesValue: 0 };
+          existing.contactedLeads += 1;
+          stateMap.set(stateName, existing);
+        }
+      }
+    });
+
+    filteredSalesForDash.forEach(sale => {
+      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      if (client) {
+        const stateName = getLocalFromPhone(client.telefone);
+        if (stateName && stateName !== 'Não Especificado' && stateName !== 'Sem DDD') {
+          const existing = stateMap.get(stateName) || { stateName, contactedLeads: 0, salesCount: 0, salesValue: 0 };
+          existing.salesCount += 1;
+          existing.salesValue += sale.value;
+          stateMap.set(stateName, existing);
+        }
+      }
+    });
+
+    return Array.from(stateMap.values()).map(item => {
+      const conversionRate = item.contactedLeads > 0 ? (item.salesCount / item.contactedLeads) * 100 : 0;
+      return {
+        ...item,
+        conversionRate: parseFloat(conversionRate.toFixed(2))
+      };
+    }).sort((a, b) => b.conversionRate - a.conversionRate);
+  }, [filteredClientsForDash, filteredSalesForDash, enrichedClients, clientTags, getClientTag]);
+
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 custom-scrollbar bg-slate-50/40">
       
@@ -937,6 +1017,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* State Conversion Rate Analysis */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm col-span-full">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-modern-text">Taxa de Conversão por Estado (Leads WhatsApp)</h3>
+                    <p className="text-[10px] text-modern-secondary uppercase tracking-wider mt-0.5">Considera leads com tags: Reloginho, Bem Sucedido, Mal Sucedido, Vendido</p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200">
+                    {stateConversionAnalysis.length} estados analisados
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-modern-secondary tracking-wider">
+                        <th className="py-2.5 px-3">Estado (UF)</th>
+                        <th className="py-2.5 px-3 text-center">Leads Contatados (WhatsApp)</th>
+                        <th className="py-2.5 px-3 text-center">Vendas Manuais</th>
+                        <th className="py-2.5 px-3 text-right">Taxa de Conversão (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 font-medium">
+                      {stateConversionAnalysis.map((item, idx) => (
+                        <tr key={item.stateName} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3 font-bold text-modern-text flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            {item.stateName}
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-700">{item.contactedLeads}</td>
+                          <td className="py-3 px-3 text-center font-bold text-emerald-600">{item.salesCount}</td>
+                          <td className="py-3 px-3 text-right">
+                            <span className={cn(
+                              "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
+                              item.conversionRate >= 10 ? "bg-emerald-100 text-emerald-800" :
+                              item.conversionRate >= 5 ? "bg-blue-100 text-blue-800" :
+                              "bg-slate-100 text-slate-700"
+                            )}>
+                              {item.conversionRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {stateConversionAnalysis.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-slate-400 italic text-xs">
+                            Nenhum lead com tags de atendimento WhatsApp no período selecionado.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
