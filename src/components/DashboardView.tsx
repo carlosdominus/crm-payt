@@ -730,6 +730,159 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }).sort((a, b) => b.conversionRate - a.conversionRate);
   }, [filteredClientsForDash, filteredSalesForDash, enrichedClients, clientTags, getClientTag, conversionProductFilter]);
 
+  const normalizeName = (name: string): string => {
+    if (!name) return '';
+    return name.trim().toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  };
+
+  const getFirstName = (fullName: string | undefined | null): string => {
+    if (!fullName) return '';
+    const trimmed = fullName.trim();
+    if (!trimmed) return '';
+    const firstWord = trimmed.split(/[\s,.-]+/)[0];
+    return normalizeName(firstWord);
+  };
+
+  const predictGenderFromName = (fullName: string | undefined | null): 'Masculino' | 'Feminino' | 'Indefinido' => {
+    const firstName = getFirstName(fullName);
+    if (!firstName || firstName.length < 2) return 'Indefinido';
+
+    const exactFemales = new Set([
+      'alice', 'beatriz', 'yasmin', 'iasmin', 'isis', 'ellen', 'helen', 'evelyn', 'karen', 'carmen', 
+      'raquel', 'abigail', 'ines', 'ester', 'nicole', 'miriam', 'vivian', 'ruth', 'iris', 'sueli', 
+      'rose', 'solange', 'denise', 'gisele', 'michele', 'michelle', 'simone', 'caroline', 'elaine', 
+      'irene', 'lourdes', 'nair', 'cleide', 'kelly', 'joyce', 'elis', 'elisabete', 'bete', 'elizabete', 
+      'rute', 'carol', 'iane', 'daiane', 'tatiane', 'cristiane', 'rosane', 'eliane', 'viviane', 
+      'lidiane', 'gislaine', 'leidiane', 'josiane', 'valdirene', 'lucilene', 'marilene', 'terezinha',
+      'isabel', 'ariane', 'mariane', 'andriele', 'gabriele', 'emmanuele', 'emanuele', 'isabelle',
+      'shirley', 'rosemary', 'janete', 'ivete', 'margarete', 'clarice', 'cleusa', 'mariza', 'luiza'
+    ]);
+
+    const exactMales = new Set([
+      'joao', 'jose', 'felipe', 'andre', 'alexandre', 'henrique', 'guilherme', 'gabriel', 'lucas', 
+      'mateus', 'matheus', 'marcos', 'pedro', 'carlos', 'thiago', 'tiago', 'rodrigo', 'bruno', 
+      'daniel', 'diego', 'rafael', 'leonardo', 'gustavo', 'marcelo', 'fernando', 'ricardo', 
+      'luiz', 'luis', 'vitor', 'victor', 'igor', 'arthur', 'artur', 'hugo', 'otavio', 'caio', 
+      'renato', 'samuel', 'eduardo', 'jorge', 'paulo', 'antonio', 'francisco', 'roberto', 'fabio', 
+      'alex', 'alan', 'willian', 'william', 'washington', 'wellington', 'jefferson', 'anderson', 
+      'robson', 'cleiton', 'everton', 'peterson', 'ederson', 'nilson', 'nelson', 'wilson', 
+      'marlon', 'valdir', 'waldir', 'vanderlei', 'wanderley', 'claudio', 'mauricio', 'rogerio', 
+      'fabricio', 'marcio', 'juliano', 'adriano', 'murilo', 'danilo', 'saulo', 'breno', 'diogo', 
+      'iago', 'yago', 'samir', 'itamar', 'moises', 'isaque', 'isaac', 'abner', 'calebe', 'jonas', 
+      'elias', 'davi', 'david', 'levi', 'enzo', 'noah', 'lucca', 'luca', 'theo', 'teo', 'heitor', 
+      'bernardo', 'miguel', 'ravi', 'gael', 'ruan', 'vini', 'vinicius', 'yuri', 'caua', 'kaue', 
+      'kauan', 'jean', 'christian', 'jonathan', 'nathan', 'ryan', 'bryan', 'kevin', 'gerson',
+      'jackson', 'harrison', 'alisson', 'alison', 'alysson', 'claudinei', 'sidney',
+      'wesley', 'andrey', 'valdey', 'kaiky', 'henry', 'giovanni', 'luigi', 'regis', 'clovis', 
+      'denis', 'elvis', 'valdemar', 'valdemir', 'ademir', 'gilmar', 'waldemir', 'neymar', 
+      'roger', 'jader', 'cleber', 'kleber', 'cesar', 'julio', 'joaquim', 'valentim', 'alef', 
+      'crispim', 'ariel', 'joel', 'leonel', 'abel', 'ezequiel', 'israel', 'nataniel', 'manoel', 
+      'manuel'
+    ]);
+
+    if (exactFemales.has(firstName)) return 'Feminino';
+    if (exactMales.has(firstName)) return 'Masculino';
+
+    if (firstName.endsWith('a')) {
+      if (['luca', 'lucca', 'andrea', 'joshua', 'sasha', 'nicola', 'gianluca'].includes(firstName)) {
+        return 'Masculino';
+      }
+      return 'Feminino';
+    }
+
+    if (
+      firstName.endsWith('ice') || firstName.endsWith('ite') || firstName.endsWith('ine') ||
+      firstName.endsWith('ane') || firstName.endsWith('ene') || firstName.endsWith('ele') ||
+      firstName.endsWith('elle') || firstName.endsWith('eth') || firstName.endsWith('ete') ||
+      firstName.endsWith('ina') || firstName.endsWith('isabelle') || firstName.endsWith('kelly') ||
+      firstName.endsWith('ely') || firstName.endsWith('yasmine') || firstName.endsWith('beatrice')
+    ) {
+      return 'Feminino';
+    }
+
+    if (
+      firstName.endsWith('o') || firstName.endsWith('os') || firstName.endsWith('us') ||
+      firstName.endsWith('as') || firstName.endsWith('on') || firstName.endsWith('am') ||
+      firstName.endsWith('an') || firstName.endsWith('el') || firstName.endsWith('er') ||
+      firstName.endsWith('ar') || firstName.endsWith('ir') || firstName.endsWith('ur') ||
+      firstName.endsWith('im') || firstName.endsWith('es') || firstName.endsWith('ey') ||
+      firstName.endsWith('ei')
+    ) {
+      if (['raquel', 'isabel', 'nair', 'ester', 'miriam', 'vivian'].includes(firstName)) {
+        return 'Feminino';
+      }
+      return 'Masculino';
+    }
+
+    return 'Indefinido';
+  };
+
+  const [selectedGenderForModal, setSelectedGenderForModal] = useState<string | null>(null);
+
+  const genderConversionAnalysis = useMemo(() => {
+    const genderMap = new Map<string, { genderName: string; contactedLeads: number; salesCount: number; salesValue: number }>();
+    genderMap.set('Feminino', { genderName: 'Feminino', contactedLeads: 0, salesCount: 0, salesValue: 0 });
+    genderMap.set('Masculino', { genderName: 'Masculino', contactedLeads: 0, salesCount: 0, salesValue: 0 });
+
+    filteredClientsForDash.forEach(client => {
+      if (conversionProductFilter !== 'all') {
+        const hasMatchingProduct = client.leads?.some(l => {
+          const pName = l.produto || '';
+          const cleaned = pName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+          return cleaned.toLowerCase() === conversionProductFilter.toLowerCase();
+        });
+        if (!hasMatchingProduct) return;
+      }
+      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+      if (['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag)) {
+        const gender = predictGenderFromName(client.nome);
+        if (gender === 'Feminino' || gender === 'Masculino') {
+          const existing = genderMap.get(gender)!;
+          existing.contactedLeads += 1;
+        }
+      }
+    });
+
+    filteredSalesForDash.forEach(sale => {
+      if (conversionProductFilter !== 'all') {
+        const sName = sale.productName || '';
+        const cleaned = sName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+        if (cleaned.toLowerCase() !== conversionProductFilter.toLowerCase()) return;
+      }
+      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      if (client) {
+        const gender = predictGenderFromName(client.nome);
+        if (gender === 'Feminino' || gender === 'Masculino') {
+          const existing = genderMap.get(gender)!;
+          existing.salesCount += 1;
+          existing.salesValue += sale.value;
+        }
+      }
+    });
+
+    return Array.from(genderMap.values()).map(item => {
+      const conversionRate = item.contactedLeads > 0 ? (item.salesCount / item.contactedLeads) * 100 : 0;
+      return {
+        ...item,
+        conversionRate: parseFloat(conversionRate.toFixed(2))
+      };
+    });
+  }, [filteredClientsForDash, filteredSalesForDash, enrichedClients, clientTags, getClientTag, conversionProductFilter]);
+
+  const selectedGenderClients = useMemo(() => {
+    if (!selectedGenderForModal) return [];
+    return filteredClientsForDash.filter(client => {
+      const gender = predictGenderFromName(client.nome);
+      if (gender !== selectedGenderForModal) return false;
+      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+      const hasContactTag = ['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag);
+      const hasSales = (client.manualSales || []).some(s => isWithinDashFilter(s.timestamp || s.date));
+      return hasContactTag || hasSales;
+    });
+  }, [selectedGenderForModal, filteredClientsForDash, clientTags, getClientTag, dashDateFilter]);
+
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 custom-scrollbar bg-slate-50/40">
       
@@ -1556,9 +1709,158 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </table>
                 </div>
               </div>
+
+              {/* Gender Conversion Table (Homens vs Mulheres) */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-modern-text">Taxa de Conversão por Gênero (Homens vs Mulheres)</h3>
+                    <p className="text-[10px] text-modern-secondary uppercase tracking-wider mt-0.5">Clique em Feminino ou Masculino para ver os leads contatados e vendas no período</p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg border border-purple-200">
+                    Análise Demográfica
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-modern-secondary tracking-wider">
+                        <th className="py-2.5 px-3">Gênero</th>
+                        <th className="py-2.5 px-3 text-center">Leads Contatados (WhatsApp)</th>
+                        <th className="py-2.5 px-3 text-center">Vendas Manuais</th>
+                        <th className="py-2.5 px-3 text-right">Taxa de Conversão (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 font-medium">
+                      {genderConversionAnalysis.map((item, idx) => (
+                        <tr 
+                          key={item.genderName} 
+                          onClick={() => setSelectedGenderForModal(item.genderName)}
+                          className="hover:bg-slate-100/90 transition-colors cursor-pointer group"
+                          title={`Clique para ver leads e vendas de ${item.genderName}`}
+                        >
+                          <td className="py-3 px-3 font-bold text-modern-text flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black flex items-center justify-center shrink-0 group-hover:bg-modern-primary group-hover:text-white transition-colors">
+                              {idx + 1}
+                            </span>
+                            <span className="underline decoration-slate-300 group-hover:decoration-modern-primary transition-all">
+                              {item.genderName}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-700">{item.contactedLeads}</td>
+                          <td className="py-3 px-3 text-center font-bold text-emerald-600">{item.salesCount}</td>
+                          <td className="py-3 px-3 text-right">
+                            <span className={cn(
+                              "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
+                              item.conversionRate >= 10 ? "bg-emerald-100 text-emerald-800" :
+                              item.conversionRate >= 5 ? "bg-blue-100 text-blue-800" :
+                              "bg-slate-100 text-slate-700"
+                            )}>
+                              {item.conversionRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </motion.div>
+      </AnimatePresence>
+
+      {/* Gender Details Modal */}
+      <AnimatePresence>
+        {selectedGenderForModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-modern-text">
+                    Leads e Vendas — Gênero: {selectedGenderForModal}
+                  </h3>
+                  <p className="text-[11px] text-modern-secondary mt-0.5">
+                    Lista de leads contatados e vendas manuais registradas para este público no período. ({selectedGenderClients.length} encontrados)
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedGenderForModal(null)}
+                  className="w-8 h-8 rounded-full bg-slate-200/60 hover:bg-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
+                {selectedGenderClients.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedGenderClients.map(client => {
+                      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+                      const clientSales = (client.manualSales || []).filter(s => isWithinDashFilter(s.timestamp || s.date));
+                      return (
+                        <div key={client.key} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <h4 className="text-xs font-bold text-modern-text">{client.nome || 'Cliente sem nome'}</h4>
+                              <p className="text-[11px] text-modern-secondary font-mono">{client.telefone || 'Sem telefone'}</p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {tag && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700">
+                                  Tag: {tag}
+                                </span>
+                              )}
+                              {clientSales.length > 0 && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                                  {clientSales.length} Venda(s) — {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(clientSales.reduce((acc, s) => acc + s.value, 0))}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {clientSales.length > 0 && (
+                            <div className="pt-2 border-t border-slate-200/60 text-[11px] space-y-1">
+                              <p className="text-[10px] font-black uppercase text-modern-secondary tracking-wider">Histórico de Vendas no Período:</p>
+                              {clientSales.map(sale => (
+                                <div key={sale.id} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
+                                  <span className="font-bold text-slate-700">{sale.productName}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-slate-400">{sale.date}</span>
+                                    <span className="font-bold text-emerald-600">
+                                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.value)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-slate-400 italic text-xs">
+                    Nenhum lead ou venda manual encontrada para este gênero no período selecionado.
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                <button
+                  onClick={() => setSelectedGenderForModal(null)}
+                  className="bg-modern-primary text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-modern-primary/90 transition-all cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
       {/* State Details Modal */}
