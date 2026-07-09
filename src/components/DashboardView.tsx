@@ -71,12 +71,77 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   handleEditSale,
   handleDeleteSale
 }) => {
-  const [activeDashSubTab, setActiveDashSubTab] = useState<'vendas' | 'relatorios' | 'leads' | 'tabela'>('vendas');
+  const [activeDashSubTab, setActiveDashSubTab] = useState<'vendas' | 'relatorios' | 'leads' | 'tabela' | 'conversao'>('vendas');
   const [dashDateFilter, setDashDateFilter] = useState<'7' | '15' | '30' | '60' | '90' | 'all' | 'custom'>('all');
   const [dashStartDate, setDashStartDate] = useState<string>('');
   const [dashEndDate, setDashEndDate] = useState<string>('');
   const [dashShowUtms, setDashShowUtms] = useState<boolean>(false);
   const [dashFilterPayment, setDashFilterPayment] = useState<'pix' | 'all'>('all');
+  const [selectedStateForModal, setSelectedStateForModal] = useState<string | null>(null);
+  const [conversionProductFilter, setConversionProductFilter] = useState<string>('all');
+
+  const uniqueProductsList = useMemo(() => {
+    const set = new Set<string>();
+    manualSales.forEach(s => {
+      if (s.productName) {
+        const clean = s.productName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+        set.add(clean);
+      }
+    });
+    enrichedClients.forEach(c => {
+      c.leads?.forEach(l => {
+        if (l.produto) {
+          const clean = l.produto.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+          set.add(clean);
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [manualSales, enrichedClients]);
+
+  const dddStateMap: Record<string, string> = {
+    '11': 'São Paulo (SP)', '12': 'São Paulo (SP)', '13': 'São Paulo (SP)', '14': 'São Paulo (SP)', '15': 'São Paulo (SP)', '16': 'São Paulo (SP)', '17': 'São Paulo (SP)', '18': 'São Paulo (SP)', '19': 'São Paulo (SP)',
+    '21': 'Rio de Janeiro (RJ)', '22': 'Rio de Janeiro (RJ)', '24': 'Rio de Janeiro (RJ)',
+    '27': 'Espírito Santo (ES)', '28': 'Espírito Santo (ES)',
+    '31': 'Minas Gerais (MG)', '32': 'Minas Gerais (MG)', '33': 'Minas Gerais (MG)', '34': 'Minas Gerais (MG)', '35': 'Minas Gerais (MG)', '37': 'Minas Gerais (MG)', '38': 'Minas Gerais (MG)',
+    '41': 'Paraná (PR)', '42': 'Paraná (PR)', '43': 'Paraná (PR)', '44': 'Paraná (PR)', '45': 'Paraná (PR)', '46': 'Paraná (PR)',
+    '47': 'Santa Catarina (SC)', '48': 'Santa Catarina (SC)', '49': 'Santa Catarina (SC)',
+    '51': 'Rio Grande do Sul (RS)', '53': 'Rio Grande do Sul (RS)', '54': 'Rio Grande do Sul (RS)', '55': 'Rio Grande do Sul (RS)',
+    '61': 'Distrito Federal (DF)',
+    '62': 'Goiás (GO)', '64': 'Goiás (GO)',
+    '63': 'Tocantins (TO)',
+    '65': 'Mato Grosso (MT)', '66': 'Mato Grosso (MT)',
+    '67': 'Mato Grosso do Sul (MS)',
+    '68': 'Acre (AC)',
+    '69': 'Rondônia (RO)',
+    '71': 'Bahia (BA)', '73': 'Bahia (BA)', '74': 'Bahia (BA)', '75': 'Bahia (BA)', '77': 'Bahia (BA)',
+    '79': 'Sergipe (SE)',
+    '81': 'Pernambuco (PE)', '87': 'Pernambuco (PE)',
+    '82': 'Alagoas (AL)',
+    '83': 'Paraíba (PB)',
+    '84': 'Rio Grande do Norte (RN)',
+    '85': 'Ceará (CE)', '88': 'Ceará (CE)',
+    '86': 'Piauí (PI)', '89': 'Piauí (PI)',
+    '91': 'Pará (PA)', '93': 'Pará (PA)', '94': 'Pará (PA)',
+    '92': 'Amazonas (AM)', '97': 'Amazonas (AM)',
+    '95': 'Roraima (RR)',
+    '96': 'Amapá (AP)',
+    '98': 'Maranhão (MA)', '99': 'Maranhão (MA)'
+  };
+
+  const getLocalFromPhone = (phone: string): string => {
+    if (!phone) return 'Não Especificado';
+    const cleaned = phone.replace(/\D/g, '');
+    let withoutDDI = cleaned;
+    if (cleaned.startsWith('55') && cleaned.length >= 10) {
+      withoutDDI = cleaned.substring(2);
+    }
+    if (withoutDDI.length >= 2) {
+      const ddd = withoutDDI.substring(0, 2);
+      return dddStateMap[ddd] || `Outros (DDD ${ddd})`;
+    }
+    return 'Sem DDD';
+  };
 
   // Filter verification helper
   const isWithinDashFilter = (itemTimestampOrDate: number | string) => {
@@ -127,6 +192,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return isWithinDashFilter(clientTime || '');
     });
   }, [enrichedClients, dashDateFilter, dashStartDate, dashEndDate]);
+
+  const selectedStateClients = useMemo(() => {
+    if (!selectedStateForModal) return [];
+    return filteredClientsForDash.filter(client => {
+      const stateName = getLocalFromPhone(client.telefone);
+      if (stateName !== selectedStateForModal) return false;
+      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+      const hasContactTag = ['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag);
+      const hasSales = (client.manualSales || []).some(s => isWithinDashFilter(s.timestamp || s.date));
+      return hasContactTag || hasSales;
+    });
+  }, [selectedStateForModal, filteredClientsForDash, clientTags, getClientTag, dashDateFilter]);
 
   const dashTotalCommission = useMemo(() => {
     return filteredSalesForDash.reduce((acc, curr) => acc + curr.commission, 0);
@@ -607,6 +684,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const stateMap = new Map<string, { stateName: string; contactedLeads: number; salesCount: number; salesValue: number }>();
 
     filteredClientsForDash.forEach(client => {
+      if (conversionProductFilter !== 'all') {
+        const hasMatchingProduct = client.leads?.some(l => {
+          const pName = l.produto || '';
+          const cleaned = pName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+          return cleaned.toLowerCase() === conversionProductFilter.toLowerCase();
+        });
+        if (!hasMatchingProduct) return;
+      }
       const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
       if (['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag)) {
         const stateName = getLocalFromPhone(client.telefone);
@@ -619,6 +704,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
 
     filteredSalesForDash.forEach(sale => {
+      if (conversionProductFilter !== 'all') {
+        const sName = sale.productName || '';
+        const cleaned = sName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
+        if (cleaned.toLowerCase() !== conversionProductFilter.toLowerCase()) return;
+      }
       const client = enrichedClients.find(c => c.key === sale.clientKey);
       if (client) {
         const stateName = getLocalFromPhone(client.telefone);
@@ -638,7 +728,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         conversionRate: parseFloat(conversionRate.toFixed(2))
       };
     }).sort((a, b) => b.conversionRate - a.conversionRate);
-  }, [filteredClientsForDash, filteredSalesForDash, enrichedClients, clientTags, getClientTag]);
+  }, [filteredClientsForDash, filteredSalesForDash, enrichedClients, clientTags, getClientTag, conversionProductFilter]);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 custom-scrollbar bg-slate-50/40">
@@ -649,7 +739,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           
           {/* Subtabs tabs layout */}
           <div className="bg-slate-100 p-1 rounded-xl flex flex-wrap items-center gap-1 select-none">
-            {(['vendas', 'relatorios', 'leads', 'tabela'] as const).map(tab => (
+            {(['vendas', 'relatorios', 'leads', 'tabela', 'conversao'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveDashSubTab(tab)}
@@ -660,7 +750,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     : "text-modern-secondary hover:text-modern-primary"
                 )}
               >
-                {tab === 'relatorios' ? 'Relatórios' : tab}
+                {tab === 'relatorios' ? 'Relatórios' : tab === 'conversao' ? 'Conversão' : tab}
               </button>
             ))}
           </div>
@@ -1017,62 +1107,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* State Conversion Rate Analysis */}
-              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm col-span-full">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-                  <div>
-                    <h3 className="text-xs font-black uppercase tracking-widest text-modern-text">Taxa de Conversão por Estado (Leads WhatsApp)</h3>
-                    <p className="text-[10px] text-modern-secondary uppercase tracking-wider mt-0.5">Considera leads com tags: Reloginho, Bem Sucedido, Mal Sucedido, Vendido</p>
-                  </div>
-                  <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200">
-                    {stateConversionAnalysis.length} estados analisados
-                  </span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-modern-secondary tracking-wider">
-                        <th className="py-2.5 px-3">Estado (UF)</th>
-                        <th className="py-2.5 px-3 text-center">Leads Contatados (WhatsApp)</th>
-                        <th className="py-2.5 px-3 text-center">Vendas Manuais</th>
-                        <th className="py-2.5 px-3 text-right">Taxa de Conversão (%)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50 font-medium">
-                      {stateConversionAnalysis.map((item, idx) => (
-                        <tr key={item.stateName} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="py-3 px-3 font-bold text-modern-text flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black flex items-center justify-center shrink-0">
-                              {idx + 1}
-                            </span>
-                            {item.stateName}
-                          </td>
-                          <td className="py-3 px-3 text-center font-bold text-slate-700">{item.contactedLeads}</td>
-                          <td className="py-3 px-3 text-center font-bold text-emerald-600">{item.salesCount}</td>
-                          <td className="py-3 px-3 text-right">
-                            <span className={cn(
-                              "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
-                              item.conversionRate >= 10 ? "bg-emerald-100 text-emerald-800" :
-                              item.conversionRate >= 5 ? "bg-blue-100 text-blue-800" :
-                              "bg-slate-100 text-slate-700"
-                            )}>
-                              {item.conversionRate}%
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {stateConversionAnalysis.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="py-8 text-center text-slate-400 italic text-xs">
-                            Nenhum lead com tags de atendimento WhatsApp no período selecionado.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
                 </div>
               </div>
             </div>
@@ -1435,7 +1469,189 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
           )}
+
+          {/* TAB: CONVERSÃO */}
+          {activeDashSubTab === 'conversao' && (
+            <div className="space-y-6">
+              {/* Product filter header card */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-modern-text">Taxa de Conversão por Estado (Leads WhatsApp)</h3>
+                  <p className="text-[10px] text-modern-secondary uppercase tracking-wider mt-0.5">Analise a eficiência de conversão por UF filtrando por produto específico</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-modern-secondary">Produto:</span>
+                  <select
+                    value={conversionProductFilter}
+                    onChange={(e) => setConversionProductFilter(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-modern-text focus:outline-none focus:ring-2 focus:ring-modern-primary/20 cursor-pointer"
+                  >
+                    <option value="all">Todos os Produtos ({uniqueProductsList.length})</option>
+                    {uniqueProductsList.map(prod => (
+                      <option key={prod} value={prod}>{prod}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* State Conversion Table */}
+              <div className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-modern-text">Resultados por Estado</h3>
+                    <p className="text-[10px] text-modern-secondary uppercase tracking-wider mt-0.5">Clique em qualquer estado para ver os leads contatados e vendas no período</p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200">
+                    {stateConversionAnalysis.length} estados analisados
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-modern-secondary tracking-wider">
+                        <th className="py-2.5 px-3">Estado (UF)</th>
+                        <th className="py-2.5 px-3 text-center">Leads Contatados (WhatsApp)</th>
+                        <th className="py-2.5 px-3 text-center">Vendas Manuais</th>
+                        <th className="py-2.5 px-3 text-right">Taxa de Conversão (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 font-medium">
+                      {stateConversionAnalysis.map((item, idx) => (
+                        <tr 
+                          key={item.stateName} 
+                          onClick={() => setSelectedStateForModal(item.stateName)}
+                          className="hover:bg-slate-100/90 transition-colors cursor-pointer group"
+                          title={`Clique para ver leads e vendas de ${item.stateName}`}
+                        >
+                          <td className="py-3 px-3 font-bold text-modern-text flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-[9px] font-black flex items-center justify-center shrink-0 group-hover:bg-modern-primary group-hover:text-white transition-colors">
+                              {idx + 1}
+                            </span>
+                            <span className="underline decoration-slate-300 group-hover:decoration-modern-primary transition-all">
+                              {item.stateName}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-slate-700">{item.contactedLeads}</td>
+                          <td className="py-3 px-3 text-center font-bold text-emerald-600">{item.salesCount}</td>
+                          <td className="py-3 px-3 text-right">
+                            <span className={cn(
+                              "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
+                              item.conversionRate >= 10 ? "bg-emerald-100 text-emerald-800" :
+                              item.conversionRate >= 5 ? "bg-blue-100 text-blue-800" :
+                              "bg-slate-100 text-slate-700"
+                            )}>
+                              {item.conversionRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {stateConversionAnalysis.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-slate-400 italic text-xs">
+                            Nenhum lead com tags de atendimento WhatsApp no período ou produto selecionado.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </motion.div>
+      </AnimatePresence>
+
+      {/* State Details Modal */}
+      <AnimatePresence>
+        {selectedStateForModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-modern-text">
+                    Leads e Vendas — {selectedStateForModal}
+                  </h3>
+                  <p className="text-[11px] text-modern-secondary mt-0.5">
+                    Lista de leads contatados e vendas manuais registradas neste estado no período. ({selectedStateClients.length} encontrados)
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedStateForModal(null)}
+                  className="w-8 h-8 rounded-full bg-slate-200/60 hover:bg-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
+                {selectedStateClients.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedStateClients.map(client => {
+                      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
+                      const clientSales = (client.manualSales || []).filter(s => isWithinDashFilter(s.timestamp || s.date));
+                      return (
+                        <div key={client.key} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <h4 className="text-xs font-bold text-modern-text">{client.nome || 'Cliente sem nome'}</h4>
+                              <p className="text-[11px] text-modern-secondary font-mono">{client.telefone || 'Sem telefone'}</p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {tag && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700">
+                                  Tag: {tag}
+                                </span>
+                              )}
+                              {clientSales.length > 0 && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                                  {clientSales.length} Venda(s) — {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(clientSales.reduce((acc, s) => acc + s.value, 0))}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {clientSales.length > 0 && (
+                            <div className="pt-2 border-t border-slate-200/60 text-[11px] space-y-1">
+                              <p className="text-[10px] font-black uppercase text-modern-secondary tracking-wider">Histórico de Vendas no Período:</p>
+                              {clientSales.map(sale => (
+                                <div key={sale.id} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
+                                  <span className="font-bold text-slate-700">{sale.productName}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-slate-400">{sale.date}</span>
+                                    <span className="font-bold text-emerald-600">
+                                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(sale.value)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-slate-400 italic text-xs">
+                    Nenhum lead ou venda manual encontrada para este estado no período selecionado.
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                <button
+                  onClick={() => setSelectedStateForModal(null)}
+                  className="bg-modern-primary text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-modern-primary/90 transition-all cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
     </div>
