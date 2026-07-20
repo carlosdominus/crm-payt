@@ -1790,9 +1790,17 @@ export default function App() {
               const isActive = !isChipCaiu;
               const deviceColor = getDeviceColor(aparelho);
 
+              // Determine a highly descriptive, readable name for the synchronized account
+              let generatedName = "";
+              if (aparelho && perfilPc && perfilPc.toLowerCase() !== 'ainda sem' && perfilPc.toLowerCase() !== 'não aplica' && perfilPc.toLowerCase() !== 'nao aplica') {
+                generatedName = `${aparelho} (${perfilPc})`;
+              } else {
+                generatedName = aparelho || perfilPc || tipoWhatsapp || `Sem Nome (ID: ${id})`;
+              }
+
               const newAcc: WhatsAppAccount = {
                 id: newAccId,
-                name: perfilPc || tipoWhatsapp || aparelho || `Sem Nome (ID: ${id})`,
+                name: generatedName,
                 identifier: perfilPc || id,
                 color: deviceColor,
                 phoneNumber: numero,
@@ -1885,6 +1893,37 @@ export default function App() {
       await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${effectiveWorkspaceId}/whatsappAccounts/${id}`);
+    }
+  };
+
+  const cleanupManualWhatsappAccounts = async () => {
+    if (!user || !effectiveWorkspaceId) return;
+    
+    const manualAccounts = whatsappAccounts.filter(acc => !acc.id.startsWith('acc_'));
+    if (manualAccounts.length === 0) {
+      alert("Nenhuma conta manual/antiga foi encontrada. Suas contas já estão 100% sincronizadas e limpas!");
+      return;
+    }
+    
+    const confirmCleanup = window.confirm(
+      `Isso irá remover ${manualAccounts.length} conta(s) criadas manualmente (incluindo as contas antigas com nome duplicado "Moto G5") que já estão integradas pela planilha.\n\nDeseja continuar com a limpeza para manter apenas os aparelhos sincronizados?`
+    );
+    
+    if (!confirmCleanup) return;
+    
+    try {
+      setIsSyncingChips(true);
+      let deletedCount = 0;
+      for (const acc of manualAccounts) {
+        await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, acc.id));
+        deletedCount++;
+      }
+      alert(`Limpeza concluída! ${deletedCount} contas manuais antigas/duplicadas foram removidas com sucesso. Agora você tem apenas as contas 100% integradas com a planilha.`);
+    } catch (error: any) {
+      console.error("Erro ao limpar contas manuais:", error);
+      alert(`Erro ao realizar a limpeza: ${error?.message || error}`);
+    } finally {
+      setIsSyncingChips(false);
     }
   };
 
@@ -6528,9 +6567,20 @@ export default function App() {
 
                 {/* Right: List */}
                 <div className="flex-1 p-8 bg-slate-100/50 overflow-y-auto custom-scrollbar">
-                  <div className="flex items-center justify-between mb-6">
-                    <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest">Contas Cadastradas ({sortedWhatsappAccounts.length})</h4>
-                    <span className="text-[10px] font-bold text-modern-secondary">{activeWhatsappAccounts.length} ativas</span>
+                  <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+                    <div className="space-y-0.5">
+                      <h4 className="text-[10px] font-black uppercase text-modern-secondary tracking-widest">Contas Cadastradas ({sortedWhatsappAccounts.length})</h4>
+                      <p className="text-[9px] font-bold text-modern-secondary">{activeWhatsappAccounts.length} ativas</p>
+                    </div>
+                    {whatsappAccounts.some(acc => !acc.id.startsWith('acc_')) && (
+                      <button
+                        onClick={cleanupManualWhatsappAccounts}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 hover:border-rose-300 font-black text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all"
+                        title="Remove as contas duplicadas/manuais antigas e deixa apenas os aparelhos sincronizados"
+                      >
+                        Limpar Contas Antigas / Duplicadas
+                      </button>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
                     {sortedWhatsappAccounts.map(acc => {
