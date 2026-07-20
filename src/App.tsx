@@ -104,6 +104,16 @@ export const NUTRA_PRODUCTS = [
 
 const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
 
+export const getDeviceColor = (aparelho?: string): string => {
+  if (!aparelho) return "#25D366";
+  const lower = aparelho.toLowerCase().trim();
+  if (lower.includes("moto g5") || lower.includes("g5")) return "#eab308"; // Yellow
+  if (lower.includes("iphone") || lower.includes("ipone")) return "#4b5563"; // Dark Gray
+  if (lower.includes("samsung a5") || lower.includes("a5")) return "#38bdf8"; // Light Blue
+  if (lower.includes("samsung carlos") || lower.includes("carlos")) return "#1d4ed8"; // Dark Blue
+  return "#25D366"; // Default green
+};
+
 export const getManualSaleCommission = (productName: string, value: number, saleType?: 'pix' | 'payt'): number => {
   const name = productName.toLowerCase().trim();
   const finalValue = saleType === 'payt' ? Math.max(0, value * 0.95 - 0.99) : value;
@@ -1728,6 +1738,7 @@ export default function App() {
             // A primeira linha é de cabeçalho, vamos pular
             const dataRows = rows.slice(1);
             let importCount = 0;
+            const importedAccIds = new Set<string>();
 
             for (const row of dataRows) {
               if (row.length < 5) continue;
@@ -1771,56 +1782,43 @@ export default function App() {
               await setDoc(docRef, chipData);
               importCount++;
 
-              // Auto-criar ou atualizar conta de WhatsApp para este chip
-              const matchingAccount = existingAccounts.find(acc => {
-                if (acc.phoneNumber && normalizedNumero) {
-                  const cleanAcc = cleanPhone(acc.phoneNumber);
-                  if (cleanAcc && cleanAcc === normalizedNumero) return true;
-                }
-                const idStr = String(acc.identifier).trim().toLowerCase();
-                return idStr === String(id).trim().toLowerCase() ||
-                       idStr === String(perfilPc).trim().toLowerCase();
-              });
+              // Auto-criar ou atualizar conta de WhatsApp para este chip com mapeamento 1 para 1 baseado no ID único do chip
+              const newAccId = `acc_${id}`;
+              importedAccIds.add(newAccId);
 
               const isChipCaiu = statusZap.toLowerCase() === 'caiu';
+              const isActive = !isChipCaiu;
+              const deviceColor = getDeviceColor(aparelho);
 
-              if (!matchingAccount) {
-                // Selecionar uma cor descritiva e diferente baseada no id
-                const colors = ["#25D366", "#3b82f6", "#f59e0b", "#ec4899", "#8b5cf6", "#10b981", "#ef4444", "#06b6d4"];
-                const colorIdx = parseInt(id, 10);
-                const color = isNaN(colorIdx) ? "#25D366" : (colors[colorIdx % colors.length] || "#25D366");
+              const newAcc: WhatsAppAccount = {
+                id: newAccId,
+                name: perfilPc || tipoWhatsapp || aparelho || `Sem Nome (ID: ${id})`,
+                identifier: perfilPc || id,
+                color: deviceColor,
+                phoneNumber: numero,
+                origin: tipo || "Geral",
+                isActive: isActive
+              };
 
-                const newAccId = `acc_${id}`;
-                const newAcc: WhatsAppAccount = {
-                  id: newAccId,
-                  name: `${aparelho || 'Chip'} (${perfilPc || id})`,
-                  identifier: perfilPc || id,
-                  color,
-                  phoneNumber: numero,
-                  origin: tipo || "Geral",
-                  isActive: !isChipCaiu
-                };
+              await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, newAccId), {
+                ...newAcc,
+                createdAt: new Date().toISOString()
+              }, { merge: true });
+            }
 
-                await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, newAccId), {
-                  ...newAcc,
-                  createdAt: new Date().toISOString()
-                }, { merge: true });
-              } else {
-                // Atualizar se está ativa/inativa dependendo do statusZap
-                if (isChipCaiu && matchingAccount.isActive) {
-                  await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, matchingAccount.id), {
-                    isActive: false
-                  }, { merge: true });
-                } else if (!isChipCaiu && !matchingAccount.isActive) {
-                  await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, matchingAccount.id), {
-                    isActive: true
-                  }, { merge: true });
+            // Excluir contas antigas auto-geradas (que começam com 'acc_') que não estão mais presentes na planilha
+            for (const acc of existingAccounts) {
+              if (acc.id.startsWith('acc_') && !importedAccIds.has(acc.id)) {
+                try {
+                  await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, acc.id));
+                } catch (e) {
+                  console.error("Erro ao deletar conta obsoleta do WhatsApp:", acc.id, e);
                 }
               }
             }
             
-            console.log(`Successfully synced ${importCount} chips and verified auto-accounts!`);
-            alert(`Sincronização concluída com sucesso! ${importCount} aparelhos WhatsApp foram importados/atualizados e integrados como contas disponíveis.`);
+            console.log(`Successfully synced ${importCount} chips and verified 1-to-1 auto-accounts!`);
+            alert(`Sincronização concluída com sucesso! ${importCount} aparelhos WhatsApp foram importados/atualizados e integrados 1-to-1 como contas disponíveis.`);
           } catch (callbackErr: any) {
             console.error("Error writing chips to Firestore:", callbackErr);
             alert(`Erro ao salvar chips no Firestore: ${callbackErr?.message || callbackErr}`);
@@ -5204,7 +5202,19 @@ export default function App() {
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500",
                                   (client.assignedWhatsappId && assignedAcc && whatsappDisplayMode === 'telefone') ? "px-1.5 py-1 min-h-[24px] min-w-[40px]" : "w-6 h-6"
                                 )}
-                                style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
+                                style={(client.assignedWhatsappId && assignedAcc) ? { 
+                                  backgroundColor: getDeviceColor(
+                                    whatsappChips.find(c => {
+                                      if (assignedAcc.phoneNumber) {
+                                        const cleanAcc = cleanPhone(assignedAcc.phoneNumber);
+                                        if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
+                                      }
+                                      const idStr = String(assignedAcc.identifier).trim().toLowerCase();
+                                      return String(c.id).trim().toLowerCase() === idStr || 
+                                             String(c.perfilPc).trim().toLowerCase() === idStr;
+                                    })?.aparelho || assignedAcc.color
+                                  )
+                                } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
                                   (() => {
@@ -5281,7 +5291,7 @@ export default function App() {
                                             "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-2 text-center truncate",
                                             whatsappDisplayMode === 'telefone' ? "min-w-[80px] h-6" : "w-8 h-8"
                                           )} 
-                                          style={{ backgroundColor: acc.color }}
+                                          style={{ backgroundColor: getDeviceColor(matchingChip?.aparelho || acc.color) }}
                                         >
                                           {badgeText}
                                         </div>
@@ -6523,41 +6533,52 @@ export default function App() {
                     <span className="text-[10px] font-bold text-modern-secondary">{activeWhatsappAccounts.length} ativas</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
-                    {sortedWhatsappAccounts.map(acc => (
-                      <div key={acc.id} className={cn(
-                        "bg-white border p-5 shadow-sm group transition-all flex flex-col min-h-[140px]",
-                        acc.isActive !== false ? "border-modern-border hover:border-emerald-500/50" : "border-slate-300 bg-slate-50/60 opacity-80"
-                      )}>
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-4 min-w-0 flex-1">
-                            <div 
-                              className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
-                              style={{ backgroundColor: acc.color }}
-                            >
-                              <span className="text-[11px] font-black">{acc.identifier}</span>
-                            </div>
-                            <div className="min-w-0 flex-1 pr-2">
-                              <div className="flex items-center gap-2 mb-1">
-                                <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight">{acc.name}</p>
-                                <span className={cn(
-                                  "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0",
-                                  acc.isActive !== false ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-slate-200 text-slate-600 border border-slate-300"
-                                )}>
-                                  {acc.isActive !== false ? "Ativa" : "Inativa"}
-                                </span>
+                    {sortedWhatsappAccounts.map(acc => {
+                      const matchingChip = whatsappChips.find(c => {
+                        if (acc.phoneNumber) {
+                          const cleanAcc = cleanPhone(acc.phoneNumber);
+                          if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
+                        }
+                        const idStr = String(acc.identifier).trim().toLowerCase();
+                        return String(c.id).trim().toLowerCase() === idStr || 
+                               String(c.perfilPc).trim().toLowerCase() === idStr;
+                      });
+
+                      return (
+                        <div key={acc.id} className={cn(
+                          "bg-white border p-5 shadow-sm group transition-all flex flex-col min-h-[140px]",
+                          acc.isActive !== false ? "border-modern-border hover:border-emerald-500/50" : "border-slate-300 bg-slate-50/60 opacity-80"
+                        )}>
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-4 min-w-0 flex-1">
+                              <div 
+                                className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm"
+                                style={{ backgroundColor: getDeviceColor(matchingChip?.aparelho || acc.color) }}
+                              >
+                                <span className="text-[11px] font-black">{acc.identifier}</span>
                               </div>
-                              <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
+                              <div className="min-w-0 flex-1 pr-2">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="text-sm font-black uppercase text-modern-text whitespace-normal break-words leading-tight">{acc.name}</p>
+                                  <span className={cn(
+                                    "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0",
+                                    acc.isActive !== false ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-slate-200 text-slate-600 border border-slate-300"
+                                  )}>
+                                    {acc.isActive !== false ? "Ativa" : "Inativa"}
+                                  </span>
+                                </div>
+                                <p className="text-[9px] font-bold text-modern-secondary uppercase tracking-wider">{acc.origin || 'Sem origem'}</p>
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-2">
-                            <button
-                              onClick={() => toggleWhatsappActive(acc)}
-                              className={cn(
-                                "px-2 py-1.5 text-[9px] font-black uppercase tracking-wider rounded border transition-all",
-                                acc.isActive !== false ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                              )}
-                              title={acc.isActive !== false ? "Inativar conta" : "Ativar conta"}
-                            >
+                            <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                              <button
+                                onClick={() => toggleWhatsappActive(acc)}
+                                className={cn(
+                                  "px-2 py-1.5 text-[9px] font-black uppercase tracking-wider rounded border transition-all",
+                                  acc.isActive !== false ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                )}
+                                title={acc.isActive !== false ? "Inativar conta" : "Ativar conta"}
+                              >
                               {acc.isActive !== false ? "Inativar" : "Ativar"}
                             </button>
                             <button 
@@ -6584,7 +6605,8 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    );
+                    })}
                     {sortedWhatsappAccounts.length === 0 && (
                       <div className="col-span-full text-center py-20 opacity-40">
                         <Phone size={48} className="mx-auto mb-4 text-modern-secondary" />
