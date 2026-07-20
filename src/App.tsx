@@ -34,6 +34,7 @@ import {
   ShoppingBag,
   MessageSquare,
   Smartphone,
+  Monitor,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format, differenceInHours, differenceInDays } from 'date-fns';
@@ -871,6 +872,9 @@ const determineActiveStatus = (leads: Lead[]): string => {
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [whatsappDisplayMode, setWhatsappDisplayMode] = useState<'pc' | 'telefone'>(() => {
+    return (localStorage.getItem('crm_whatsapp_display_mode') as 'pc' | 'telefone') || 'pc';
+  });
   const [top10Copied, setTop10Copied] = useState(false);
   const seenLeadIdsRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -1646,64 +1650,92 @@ export default function App() {
     setIsSyncingChips(true);
     try {
       const sheetUrl = "https://docs.google.com/spreadsheets/d/1on0R2ShR-BGa4DzImdhfGZpSAN02HjHk/export?format=csv";
-      const response = await fetch(sheetUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
+      let response;
+      try {
+        response = await fetch(sheetUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch sheet directly. Status: ${response.status}`);
+        }
+      } catch (directErr) {
+        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxy...", directErr);
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(sheetUrl)}`;
+        response = await fetch(proxyUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch sheet via CORS proxy. Status: ${response.status}`);
+        }
       }
+      
       const csvText = await response.text();
       
       Papa.parse(csvText, {
         header: true,
         skipEmptyLines: true,
         complete: async (results) => {
-          const rows = results.data as any[];
-          for (const row of rows) {
-            const getVal = (possibleKeys: string[]): string => {
-              for (const k of Object.keys(row)) {
-                const normalizedK = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                if (possibleKeys.some(pk => normalizedK === pk || normalizedK.includes(pk))) {
-                  return String(row[k] || "").trim();
+          try {
+            const rows = results.data as any[];
+            if (!rows || rows.length === 0) {
+              alert("Nenhum dado encontrado na planilha.");
+              setIsSyncingChips(false);
+              return;
+            }
+
+            let importCount = 0;
+            for (const row of rows) {
+              const getVal = (possibleKeys: string[]): string => {
+                for (const k of Object.keys(row)) {
+                  const normalizedK = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                  if (possibleKeys.some(pk => normalizedK === pk || normalizedK.includes(pk))) {
+                    return String(row[k] || "").trim();
+                  }
                 }
-              }
-              return "";
-            };
+                return "";
+              };
 
-            const id = getVal(["id"]);
-            if (!id) continue;
+              const id = getVal(["id"]);
+              if (!id) continue;
 
-            const tipo = getVal(["tipo"]);
-            const localChip = getVal(["local chip telefone", "local chip", "local"]);
-            const chipCadastrado = getVal(["chip cadastrado", "chip"]);
-            const numero = getVal(["numero", "phone", "telefone"]);
-            const tipoWhatsapp = getVal(["tipo de whatsapp", "tipo whatsapp", "tipo de zap"]);
-            const aparelho = getVal(["aparelho telefone conectado", "aparelho", "dispositivo"]);
-            const perfilPc = getVal(["perfil conectado pc", "perfil pc", "perfil"]);
-            const qrCodePc = getVal(["qr code lido no pc", "qr code pc", "qr code"]);
-            const statusConexaoPc = getVal(["status conexao pc", "conexao pc", "conexao"]);
-            const statusZap = getVal(["status zap", "zap status", "status"]);
+              const tipo = getVal(["tipo"]);
+              const localChip = getVal(["local chip telefone", "local chip", "local"]);
+              const chipCadastrado = getVal(["chip cadastrado", "chip"]);
+              const numero = getVal(["numero", "phone", "telefone"]);
+              const tipoWhatsapp = getVal(["tipo de whatsapp", "tipo whatsapp", "tipo de zap"]);
+              const aparelho = getVal(["aparelho telefone conectado", "aparelho", "dispositivo"]);
+              const perfilPc = getVal(["perfil conectado pc", "perfil pc", "perfil"]);
+              const qrCodePc = getVal(["qr code lido no pc", "qr code pc", "qr code"]);
+              const statusConexaoPc = getVal(["status conexao pc", "conexao pc", "conexao"]);
+              const statusZap = getVal(["status zap", "zap status", "status"]);
 
-            const normalizedNumero = cleanPhone(numero);
+              const normalizedNumero = cleanPhone(numero);
 
-            const chipData: WhatsAppChip = {
-              id,
-              tipo,
-              localChip,
-              chipCadastrado,
-              numero,
-              normalizedNumero,
-              tipoWhatsapp,
-              aparelho,
-              perfilPc,
-              qrCodePc,
-              statusConexaoPc,
-              statusZap,
-              updatedAt: new Date().toISOString()
-            };
+              const chipData: WhatsAppChip = {
+                id,
+                tipo,
+                localChip,
+                chipCadastrado,
+                numero,
+                normalizedNumero,
+                tipoWhatsapp,
+                aparelho,
+                perfilPc,
+                qrCodePc,
+                statusConexaoPc,
+                statusZap,
+                updatedAt: new Date().toISOString()
+              };
 
-            const docRef = doc(db, `users/${effectiveWorkspaceId}/whatsappChips`, id);
-            await setDoc(docRef, chipData);
+              const docRef = doc(db, `users/${effectiveWorkspaceId}/whatsappChips`, id);
+              await setDoc(docRef, chipData);
+              importCount++;
+            }
+            
+            console.log(`Successfully synced ${importCount} chips!`);
+            alert(`Sincronização concluída com sucesso! ${importCount} aparelhos WhatsApp foram importados/atualizados.`);
+          } catch (callbackErr: any) {
+            console.error("Error writing chips to Firestore:", callbackErr);
+            alert(`Erro ao salvar chips no Firestore: ${callbackErr?.message || callbackErr}`);
+          } finally {
+            setIsSyncingChips(false);
           }
-          setIsSyncingChips(false);
         },
         error: (err: any) => {
           console.error("Papa.parse error:", err);
@@ -1711,9 +1743,9 @@ export default function App() {
           setIsSyncingChips(false);
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Sync error:", error);
-      alert("Erro ao buscar dados da planilha de aparelhos WhatsApp.");
+      alert(`Erro ao buscar dados da planilha de aparelhos WhatsApp: ${error?.message || error}`);
       setIsSyncingChips(false);
     }
   };
@@ -4866,6 +4898,44 @@ export default function App() {
               )}
             </button>
 
+            {/* PC / Telefone Toggle Switch */}
+            <div className="flex items-center border border-modern-border rounded-lg p-1 bg-slate-50 shadow-sm shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setWhatsappDisplayMode('pc');
+                  localStorage.setItem('crm_whatsapp_display_mode', 'pc');
+                }}
+                className={cn(
+                  "px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 rounded-md",
+                  whatsappDisplayMode === 'pc'
+                    ? "bg-modern-primary text-white shadow-sm"
+                    : "text-[#5f6368] hover:text-modern-text hover:bg-slate-100"
+                )}
+                title="Mostrar ID / Perfil conectado no PC"
+              >
+                <Monitor size={14} />
+                <span>PC</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWhatsappDisplayMode('telefone');
+                  localStorage.setItem('crm_whatsapp_display_mode', 'telefone');
+                }}
+                className={cn(
+                  "px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 rounded-md",
+                  whatsappDisplayMode === 'telefone'
+                    ? "bg-modern-primary text-white shadow-sm"
+                    : "text-[#5f6368] hover:text-modern-text hover:bg-slate-100"
+                )}
+                title="Mostrar nome do Telefone conectado"
+              >
+                <Smartphone size={14} />
+                <span>Telefone</span>
+              </button>
+            </div>
+
           <div className="flex-1" />
           <p className="text-xs font-bold text-modern-secondary bg-white px-4 py-2 rounded-lg border border-modern-border shadow-sm">
             {filteredClients.length} resultados
@@ -5004,22 +5074,36 @@ export default function App() {
                               <button 
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
-                                  "w-6 h-6 rounded-md flex items-center justify-center transition-all border shadow-sm",
+                                  "rounded-md flex items-center justify-center transition-all border shadow-sm text-white font-extrabold text-[9px]",
                                   (client.assignedWhatsappId && assignedAcc)
                                     ? "text-white" 
-                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500"
+                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500",
+                                  (client.assignedWhatsappId && assignedAcc && whatsappDisplayMode === 'telefone') ? "px-1.5 py-1 min-h-[24px] min-w-[40px]" : "w-6 h-6"
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? { backgroundColor: assignedAcc.color } : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
-                                  <span className="text-[9px] font-black">{assignedAcc.identifier}</span>
+                                  (() => {
+                                    const matchingChip = whatsappChips.find(c => {
+                                      if (assignedAcc.phoneNumber) {
+                                        const cleanAcc = cleanPhone(assignedAcc.phoneNumber);
+                                        if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
+                                      }
+                                      const idStr = String(assignedAcc.identifier).trim().toLowerCase();
+                                      return String(c.id).trim().toLowerCase() === idStr || 
+                                             String(c.perfilPc).trim().toLowerCase() === idStr;
+                                    });
+                                    return whatsappDisplayMode === 'telefone' && matchingChip
+                                      ? (matchingChip.aparelho || "Sem Tel")
+                                      : assignedAcc.identifier;
+                                  })()
                                 ) : (
                                   <Phone size={11} />
                                 )}
                               </button>
                               
                               <div className={cn(
-                                "absolute left-1/2 -translate-x-1/2 w-64 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
+                                "absolute left-1/2 -translate-x-1/2 w-72 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
                                 idx < 10 ? "top-full mt-2" : "bottom-full mb-2"
                               )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
@@ -5041,27 +5125,53 @@ export default function App() {
                                       Remover Atribuição
                                     </button>
                                   )}
-                                  {activeWhatsappAccounts.map(acc => (
-                                    <button 
-                                      key={acc.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
-                                      }}
-                                      className={cn(
-                                        "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
-                                        client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
-                                      )}
-                                    >
-                                      <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm" style={{ backgroundColor: acc.color }}>
-                                        {acc.identifier}
-                                      </div>
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="truncate text-modern-text leading-none mb-1">{acc.name}</span>
-                                        <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-60">{acc.origin}</span>
-                                      </div>
-                                    </button>
-                                  ))}
+                                  {activeWhatsappAccounts.map(acc => {
+                                    const matchingChip = whatsappChips.find(c => {
+                                      if (acc.phoneNumber) {
+                                        const cleanAcc = cleanPhone(acc.phoneNumber);
+                                        if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
+                                      }
+                                      const idStr = String(acc.identifier).trim().toLowerCase();
+                                      return String(c.id).trim().toLowerCase() === idStr || 
+                                             String(c.perfilPc).trim().toLowerCase() === idStr;
+                                    });
+
+                                    const badgeText = (whatsappDisplayMode === 'telefone' && matchingChip)
+                                      ? (matchingChip.aparelho || "Sem Tel")
+                                      : acc.identifier;
+
+                                    return (
+                                      <button 
+                                        key={acc.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
+                                        }}
+                                        className={cn(
+                                          "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
+                                          client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
+                                        )}
+                                      >
+                                        <div 
+                                          className={cn(
+                                            "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-1 text-center truncate",
+                                            whatsappDisplayMode === 'telefone' ? "min-w-[56px] h-6" : "w-6 h-6"
+                                          )} 
+                                          style={{ backgroundColor: acc.color }}
+                                        >
+                                          {badgeText}
+                                        </div>
+                                        <div className="flex flex-col min-w-0 flex-1">
+                                          <span className="truncate text-modern-text leading-none mb-1">{acc.name}</span>
+                                          <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-85">
+                                            {whatsappDisplayMode === 'telefone' && matchingChip
+                                              ? `Nº: ${matchingChip.numero}`
+                                              : acc.origin}
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
                                   {activeWhatsappAccounts.length === 0 && (
                                     <div className="px-4 py-8 text-[10px] text-modern-secondary text-center italic font-bold bg-slate-50/50 uppercase tracking-widest">
                                       Nenhum Zap cadastrado.
