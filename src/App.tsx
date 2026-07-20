@@ -1676,11 +1676,30 @@ export default function App() {
           throw new Error(`Failed to fetch sheet directly. Status: ${response.status}`);
         }
       } catch (directErr) {
-        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxy...", directErr);
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(sheetUrl)}`;
-        response = await fetch(proxyUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch sheet via CORS proxy. Status: ${response.status}`);
+        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxies...", directErr);
+        
+        const proxies = [
+          `https://corsproxy.io/?${encodeURIComponent(sheetUrl)}`,
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(sheetUrl)}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(sheetUrl)}`
+        ];
+
+        let success = false;
+        for (const proxy of proxies) {
+          try {
+            console.log(`Trying proxy: ${proxy}`);
+            response = await fetch(proxy);
+            if (response.ok) {
+              success = true;
+              break;
+            }
+          } catch (proxyErr) {
+            console.warn(`Proxy failed: ${proxy}`, proxyErr);
+          }
+        }
+
+        if (!success) {
+          throw new Error("Não foi possível conectar a nenhum servidor de proxy CORS para buscar os aparelhos WhatsApp.");
         }
       }
       
@@ -2473,11 +2492,30 @@ export default function App() {
           throw new Error(`Failed to fetch sheet directly. Status: ${response.status}`);
         }
       } catch (directErr) {
-        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxy...", directErr);
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-        response = await fetch(proxyUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch sheet via CORS proxy. Status: ${response.status}`);
+        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxies...", directErr);
+        
+        const proxies = [
+          `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
+        ];
+
+        let success = false;
+        for (const proxy of proxies) {
+          try {
+            console.log(`Trying proxy: ${proxy}`);
+            response = await fetch(proxy);
+            if (response.ok) {
+              success = true;
+              break;
+            }
+          } catch (proxyErr) {
+            console.warn(`Proxy failed: ${proxy}`, proxyErr);
+          }
+        }
+
+        if (!success) {
+          throw new Error("Não foi possível conectar a nenhum servidor de proxy CORS para buscar os dados da planilha de clientes.");
         }
       }
       const csvText = await response.text();
@@ -5199,8 +5237,8 @@ export default function App() {
                                               <span className={cn(
                                                 "px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider shrink-0 border",
                                                 matchingChip.tipoWhatsapp.toLowerCase() === 'business' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                                matchingChip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                                matchingChip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                                                matchingChip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                                                matchingChip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-amber-50 text-amber-700 border-amber-200" :
                                                 "bg-slate-50 text-slate-700 border-slate-200"
                                               )}>
                                                 {matchingChip.tipoWhatsapp}

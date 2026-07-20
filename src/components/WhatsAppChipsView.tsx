@@ -342,8 +342,8 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                         <span className={cn(
                           "inline-block px-2 py-0.5 rounded-md text-[9.5px] font-extrabold uppercase tracking-wide border",
                           chip.tipoWhatsapp.toLowerCase() === 'business' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                          chip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                          chip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                          chip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                          chip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-amber-50 text-amber-700 border-amber-200" :
                           "bg-slate-50 text-slate-700 border-slate-200"
                         )}>
                           {chip.tipoWhatsapp}
