@@ -32,11 +32,14 @@ import {
   AlertCircle,
   Hash,
   ShoppingBag,
+  MessageSquare,
+  Smartphone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parse, getTime, startOfDay, endOfDay, startOfWeek, startOfMonth, isWithinInterval, format, differenceInHours, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { DashboardView } from './components/DashboardView';
+import { WhatsAppChipsView } from './components/WhatsAppChipsView';
 
 import { 
   auth, 
@@ -59,7 +62,7 @@ import {
   OperationType
 } from './firebase';
 
-import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog } from './types';
+import { Lead, Client, STATUS_THEMES, ManualSale, WhatsAppAccount, WhatsAppChip, WorkspaceInvite, WorkspaceKey, ClientTag, InteractionLog } from './types';
 import { cn } from './lib/utils';
 import { generatePersonalizedMessage } from './services/gemini';
 import { 
@@ -965,7 +968,7 @@ export default function App() {
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('crm_sheet_sync_url') || "");
   const [sheetCsvUrl, setSheetCsvUrl] = useState(() => localStorage.getItem('crm_sheet_csv_url') || SHEET_CSV_URL);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [view, setView] = useState<'crm' | 'dashboard' | 'followup'>('crm');
+  const [view, setView] = useState<'crm' | 'dashboard' | 'followup' | 'whatsapp'>('crm');
   // Dashboard Subtabs & Date Filters
   const [activeDashSubTab, setActiveDashSubTab] = useState<'vendas' | 'relatorios' | 'leads' | 'tabela'>('vendas');
   const [dashDateFilter, setDashDateFilter] = useState<'7' | '15' | '30' | '60' | '90' | 'all' | 'custom'>('all');
@@ -990,6 +993,9 @@ export default function App() {
   const [editClientPhone, setEditClientPhone] = useState("");
 
   const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccount[]>([]);
+  const [whatsappChips, setWhatsappChips] = useState<WhatsAppChip[]>([]);
+  const [isSyncingChips, setIsSyncingChips] = useState(false);
+  const [activeWhatsappChip, setActiveWhatsappChip] = useState<WhatsAppChip | null>(null);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string; nome?: string; email?: string; telefone?: string }>>({});
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
@@ -1594,6 +1600,123 @@ export default function App() {
 
     return () => unsubscribe();
   }, [authReady, effectiveWorkspaceId]);
+
+  useEffect(() => {
+    if (!authReady || !effectiveWorkspaceId) {
+      setWhatsappChips([]);
+      return;
+    }
+
+    const q = collection(db, `users/${effectiveWorkspaceId}/whatsappChips`);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const chips = snapshot.docs.map(doc => doc.data() as WhatsAppChip);
+      setWhatsappChips(chips);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/whatsappChips`);
+    });
+
+    return () => unsubscribe();
+  }, [authReady, effectiveWorkspaceId]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('crm_active_whatsapp_chip');
+      if (stored) {
+        const parsed = JSON.parse(stored) as WhatsAppChip;
+        if (whatsappChips.some(c => c.id === parsed.id)) {
+          setActiveWhatsappChip(parsed);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    if (whatsappChips.length > 0 && !activeWhatsappChip) {
+      const active = whatsappChips.find(c => c.statusZap?.toLowerCase() === 'ativo');
+      if (active) {
+        setActiveWhatsappChip(active);
+      } else {
+        setActiveWhatsappChip(whatsappChips[0]);
+      }
+    }
+  }, [whatsappChips, activeWhatsappChip]);
+
+  const syncWhatsappChips = async () => {
+    if (!user || !effectiveWorkspaceId) return;
+    setIsSyncingChips(true);
+    try {
+      const sheetUrl = "https://docs.google.com/spreadsheets/d/1on0R2ShR-BGa4DzImdhfGZpSAN02HjHk/export?format=csv";
+      const response = await fetch(sheetUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sheet. Status: ${response.status}`);
+      }
+      const csvText = await response.text();
+      
+      Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results) => {
+          const rows = results.data as any[];
+          for (const row of rows) {
+            const getVal = (possibleKeys: string[]): string => {
+              for (const k of Object.keys(row)) {
+                const normalizedK = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                if (possibleKeys.some(pk => normalizedK === pk || normalizedK.includes(pk))) {
+                  return String(row[k] || "").trim();
+                }
+              }
+              return "";
+            };
+
+            const id = getVal(["id"]);
+            if (!id) continue;
+
+            const tipo = getVal(["tipo"]);
+            const localChip = getVal(["local chip telefone", "local chip", "local"]);
+            const chipCadastrado = getVal(["chip cadastrado", "chip"]);
+            const numero = getVal(["numero", "phone", "telefone"]);
+            const tipoWhatsapp = getVal(["tipo de whatsapp", "tipo whatsapp", "tipo de zap"]);
+            const aparelho = getVal(["aparelho telefone conectado", "aparelho", "dispositivo"]);
+            const perfilPc = getVal(["perfil conectado pc", "perfil pc", "perfil"]);
+            const qrCodePc = getVal(["qr code lido no pc", "qr code pc", "qr code"]);
+            const statusConexaoPc = getVal(["status conexao pc", "conexao pc", "conexao"]);
+            const statusZap = getVal(["status zap", "zap status", "status"]);
+
+            const normalizedNumero = cleanPhone(numero);
+
+            const chipData: WhatsAppChip = {
+              id,
+              tipo,
+              localChip,
+              chipCadastrado,
+              numero,
+              normalizedNumero,
+              tipoWhatsapp,
+              aparelho,
+              perfilPc,
+              qrCodePc,
+              statusConexaoPc,
+              statusZap,
+              updatedAt: new Date().toISOString()
+            };
+
+            const docRef = doc(db, `users/${effectiveWorkspaceId}/whatsappChips`, id);
+            await setDoc(docRef, chipData);
+          }
+          setIsSyncingChips(false);
+        },
+        error: (err: any) => {
+          console.error("Papa.parse error:", err);
+          alert("Erro ao processar arquivo CSV da planilha.");
+          setIsSyncingChips(false);
+        }
+      });
+    } catch (error) {
+      console.error("Sync error:", error);
+      alert("Erro ao buscar dados da planilha de aparelhos WhatsApp.");
+      setIsSyncingChips(false);
+    }
+  };
 
   const saveWhatsappAccount = async () => {
     if (!user || !effectiveWorkspaceId) return;
@@ -3698,8 +3821,6 @@ export default function App() {
             </div>
             <div className="flex items-center gap-4">
               <h1 className="text-lg font-bold tracking-tight text-modern-text">Dominus CRM</h1>
-              <div className="h-4 w-px bg-modern-border" />
-              <p className="text-xs font-semibold text-modern-secondary">Controle de Leads</p>
             </div>
             {effectiveOwnerEmail && user && effectiveOwnerEmail !== user.email && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-tighter rounded-md">
@@ -3723,26 +3844,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-6">
-            <div className="hidden lg:flex gap-6">
-              <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Minha Comissão</p>
-                <p className="text-sm font-bold text-emerald-600">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalCommission)}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Vendas Manuais</p>
-                <p className="text-sm font-bold text-modern-text">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.manualRevenue)}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-modern-secondary">Total Planilha</p>
-                <p className="text-sm font-bold text-modern-text">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalRevenue)}
-                </p>
-              </div>
-            </div>
             <div className="flex items-center gap-2">
                <button 
                 onClick={() => setView(view === 'followup' ? 'crm' : 'followup')}
@@ -3763,6 +3864,16 @@ export default function App() {
                 title={view === 'dashboard' ? "Ver CRM" : "Ver Dashboard"}
               >
                 {view === 'dashboard' ? <Users size={18} /> : <LayoutDashboard size={18} />}
+              </button>
+              <button 
+                onClick={() => setView(view === 'whatsapp' ? 'crm' : 'whatsapp')}
+                className={cn(
+                  "w-10 h-10 border border-modern-border rounded-lg flex items-center justify-center transition-all shadow-sm",
+                  view === 'whatsapp' ? "bg-modern-primary text-white" : "bg-white text-modern-secondary hover:text-modern-primary"
+                )}
+                title="Aparelhos WhatsApp"
+              >
+                <Smartphone size={18} />
               </button>
               <button 
                 onClick={() => setShowSettings(true)}
@@ -5131,6 +5242,24 @@ export default function App() {
           </div>
         </div>
       </>
+    ) : view === 'whatsapp' ? (
+      <WhatsAppChipsView 
+        chips={whatsappChips}
+        clients={enrichedClients}
+        isSyncing={isSyncingChips}
+        onSync={syncWhatsappChips}
+        selectedClient={currentSelectedClient}
+        activeChip={activeWhatsappChip}
+        onSetActiveChip={(chip) => {
+          setActiveWhatsappChip(chip);
+          localStorage.setItem('crm_active_whatsapp_chip', JSON.stringify(chip));
+        }}
+        onSelectClient={(c) => {
+          setSelectedClient(c);
+          setView('crm');
+        }}
+        onGoToCrm={() => setView('crm')}
+      />
     ) : (
       <DashboardView 
         manualSales={manualSales}
@@ -5525,21 +5654,28 @@ export default function App() {
                                     {copied ? <CheckCircle2 size={16} className="text-emerald-500" /> : <Copy size={16} />}
                                   </button>
                                 </div>
-                                <div className="flex gap-4">
-                                  <a 
-                                    href={`https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage)}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="modern-button flex-1 flex items-center justify-center gap-3"
-                                  >
-                                    <ExternalLink size={16} /> Enviar WhatsApp
-                                  </a>
-                                  <button 
-                                    onClick={() => {setGeneratedMessage(null); setSelectedLead(null);}}
-                                    className="modern-button-secondary"
-                                  >
-                                    Fechar
-                                  </button>
+                                <div className="flex flex-col gap-2.5">
+                                  <div className="flex gap-4">
+                                    <a 
+                                      href={`https://wa.me/${currentSelectedClient.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(generatedMessage)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="modern-button flex-1 flex items-center justify-center gap-3"
+                                    >
+                                      <ExternalLink size={16} /> Enviar WhatsApp
+                                    </a>
+                                    <button 
+                                      onClick={() => {setGeneratedMessage(null); setSelectedLead(null);}}
+                                      className="modern-button-secondary"
+                                    >
+                                      Fechar
+                                    </button>
+                                  </div>
+                                  {activeWhatsappChip && (
+                                    <div className="text-[10px] text-modern-secondary font-medium text-center bg-slate-50 border border-modern-border py-1.5 px-3 rounded-lg">
+                                      Disparando via: <strong className="text-modern-text">{activeWhatsappChip.aparelho}</strong> ({activeWhatsappChip.numero})
+                                    </div>
+                                  )}
                                 </div>
                               </motion.div>
                             )}

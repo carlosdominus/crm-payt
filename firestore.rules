@@ -110,6 +110,24 @@ service cloud.firestore {
       }
     }
 
+    // --- WhatsApp Chips ---
+    match /users/{userId}/whatsappChips/{chipId} {
+      allow read: if isOwnerOrPartner(userId);
+      allow create, update: if isOwnerOrPartner(userId)
+        && isValidId(chipId)
+        && isValidWhatsAppChip(incoming())
+        && incoming().id == chipId;
+      allow delete: if isOwnerOrPartner(userId);
+
+      function isValidWhatsAppChip(data) {
+        return data.keys().hasAll(['id', 'numero', 'normalizedNumero'])
+          && data.keys().size() <= 15
+          && data.id is string && data.id.size() <= 128
+          && data.numero is string && data.numero.size() <= 100
+          && data.normalizedNumero is string && data.normalizedNumero.size() <= 100;
+      }
+    }
+
     // --- Client Extra Data (clientData) ---
     match /users/{userId}/clientData/{clientKey} {
       allow read: if isOwnerOrPartner(userId);

@@ -37,6 +37,22 @@ export interface WhatsAppAccount {
   isActive?: boolean;
 }
 
+export interface WhatsAppChip {
+  id: string;
+  tipo: string;
+  localChip: string;
+  chipCadastrado: string;
+  numero: string;
+  normalizedNumero: string;
+  tipoWhatsapp: string;
+  aparelho: string;
+  perfilPc: string;
+  qrCodePc: string;
+  statusConexaoPc: string;
+  statusZap: string;
+  updatedAt: string;
+}
+
 export interface ManualSale {
   id: string;
   clientKey: string;

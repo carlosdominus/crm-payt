@@ -68,6 +68,27 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["clientKey", "nome", "telefone", "zap", "date", "status"]
+    },
+    "WhatsAppChip": {
+      "title": "WhatsApp Chip",
+      "description": "WhatsApp chips in operation imported from sheet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tipo": { "type": "string" },
+        "localChip": { "type": "string" },
+        "chipCadastrado": { "type": "string" },
+        "numero": { "type": "string" },
+        "normalizedNumero": { "type": "string" },
+        "tipoWhatsapp": { "type": "string" },
+        "aparelho": { "type": "string" },
+        "perfilPc": { "type": "string" },
+        "qrCodePc": { "type": "string" },
+        "statusConexaoPc": { "type": "string" },
+        "statusZap": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "numero", "normalizedNumero"]
     }
   },
   "firestore": {
@@ -90,6 +111,10 @@
     "/users/{userId}/manualFollowups/{followupId}": {
       "schema": "ManualFollowup",
       "description": "Scheduled manual follow-ups"
+    },
+    "/users/{userId}/whatsappChips/{chipId}": {
+      "schema": "WhatsAppChip",
+      "description": "Imported WhatsApp operating chips"
     }
   }
 }
