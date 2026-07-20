@@ -123,7 +123,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
   };
 
   return (
-    <div className="px-10 py-6 flex flex-col h-full overflow-y-auto bg-modern-bg space-y-6">
+    <div className="px-10 py-6 flex flex-col h-[calc(100vh-5rem)] overflow-y-auto bg-modern-bg space-y-6">
       
       {/* Top Banner / Hero area */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-modern-border shadow-sm">
@@ -256,8 +256,6 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                 <th className="px-6 py-4">Aparelho</th>
                 <th className="px-6 py-4">Perfil PC / Conexão</th>
                 <th className="px-6 py-4">Status ZAP</th>
-                <th className="px-6 py-4">Vinculado a Cliente</th>
-                <th className="px-6 py-4 text-center">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -391,77 +389,13 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                     <td className="px-6 py-4.5">
                       {statusBadge}
                     </td>
-
-                    {/* Vinculado a Cliente */}
-                    <td className="px-6 py-4.5">
-                      {linkedClient ? (
-                        <div className="flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => onSelectClient(linkedClient)}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <div>
-                            <p className="font-bold text-emerald-700">{linkedClient.nome}</p>
-                            <p className="text-[9px] text-modern-secondary font-medium">{linkedClient.telefone}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] font-bold text-modern-secondary uppercase tracking-wider bg-slate-50 border border-slate-200 px-2 py-0.5 rounded">
-                          Não Vinculado
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Ações */}
-                    <td className="px-6 py-4.5 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        {/* Ativar chip para operação */}
-                        <button
-                          onClick={() => {
-                            if (statusLower === 'caiu') {
-                              alert("Este chip está com status 'Caiu' e não pode ser ativado para operação no sistema.");
-                              return;
-                            }
-                            onSetActiveChip(chip);
-                          }}
-                          disabled={statusLower === 'caiu'}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1",
-                            isSelectedActive 
-                              ? "bg-modern-primary border-modern-primary text-white font-extrabold shadow-sm"
-                              : statusLower === 'caiu'
-                                ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
-                                : "bg-white hover:bg-slate-50 border-modern-border text-modern-secondary hover:text-modern-primary"
-                          )}
-                        >
-                          {isSelectedActive ? <Check size={12} /> : null}
-                          {isSelectedActive ? "Usando este" : statusLower === 'caiu' ? "Indisponível" : "Usar este"}
-                        </button>
-
-                        {/* Contatar cliente selecionado ou outro */}
-                        {statusLower !== 'caiu' && (
-                          selectedClient ? (
-                            <button
-                              onClick={() => handleOpenChat(chip, selectedClient)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
-                            >
-                              <Phone size={12} /> Falar com {selectedClient.nome.split(' ')[0]}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => setShowClientSelectorForChip(chip)}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
-                            >
-                              <User size={12} /> Escolher Contato
-                            </button>
-                          )
-                        )}
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
 
               {filteredChips.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-16 text-center text-modern-secondary">
+                  <td colSpan={6} className="px-6 py-16 text-center text-modern-secondary">
                     <Smartphone size={32} className="mx-auto mb-3 opacity-20 text-modern-secondary" />
                     <p className="text-xs font-bold uppercase tracking-wider">Nenhum chip encontrado.</p>
                     <p className="text-[11px] text-modern-secondary/60 mt-1">Sincronize com a planilha para importar novos aparelhos.</p>
