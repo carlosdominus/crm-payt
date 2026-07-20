@@ -123,7 +123,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
   };
 
   return (
-    <div className="px-10 py-6 flex flex-col h-[calc(100vh-5rem)] overflow-y-auto bg-modern-bg space-y-6">
+    <div className="px-10 py-6 flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-modern-bg space-y-6">
       
       {/* Top Banner / Hero area */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-modern-border shadow-sm">
