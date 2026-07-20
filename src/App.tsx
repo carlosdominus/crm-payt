@@ -1024,8 +1024,27 @@ export default function App() {
   }, [whatsappAccounts]);
 
   const activeWhatsappAccounts = useMemo(() => {
-    return sortedWhatsappAccounts.filter(acc => acc.isActive !== false);
-  }, [sortedWhatsappAccounts]);
+    return sortedWhatsappAccounts.filter(acc => {
+      if (acc.isActive === false) return false;
+      
+      // Se houver um chip correspondente sincronizado com a planilha Dominus
+      // e o status dele for 'caiu', inativa do sistema para não permitir atribuição
+      const matchingChip = whatsappChips.find(c => {
+        if (acc.phoneNumber) {
+          const cleanAcc = cleanPhone(acc.phoneNumber);
+          if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
+        }
+        const idStr = String(acc.identifier).trim().toLowerCase();
+        return String(c.id).trim().toLowerCase() === idStr || 
+               String(c.perfilPc).trim().toLowerCase() === idStr;
+      });
+      
+      if (matchingChip && (matchingChip.statusZap || '').trim().toLowerCase() === 'caiu') {
+        return false;
+      }
+      return true;
+    });
+  }, [sortedWhatsappAccounts, whatsappChips]);
 
   const toggleWhatsappActive = async (acc: WhatsAppAccount) => {
     if (!user || !effectiveWorkspaceId) return;
@@ -1668,42 +1687,39 @@ export default function App() {
       const csvText = await response.text();
       
       Papa.parse(csvText, {
-        header: true,
+        header: false,
         skipEmptyLines: true,
         complete: async (results) => {
           try {
-            const rows = results.data as any[];
-            if (!rows || rows.length === 0) {
+            const rows = results.data as string[][];
+            if (!rows || rows.length <= 1) {
               alert("Nenhum dado encontrado na planilha.");
               setIsSyncingChips(false);
               return;
             }
 
+            // A primeira linha é de cabeçalho, vamos pular
+            const dataRows = rows.slice(1);
             let importCount = 0;
-            for (const row of rows) {
-              const getVal = (possibleKeys: string[]): string => {
-                for (const k of Object.keys(row)) {
-                  const normalizedK = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                  if (possibleKeys.some(pk => normalizedK === pk || normalizedK.includes(pk))) {
-                    return String(row[k] || "").trim();
-                  }
-                }
-                return "";
-              };
 
-              const id = getVal(["id"]);
-              if (!id) continue;
+            for (const row of dataRows) {
+              if (row.length < 5) continue;
 
-              const tipo = getVal(["tipo"]);
-              const localChip = getVal(["local chip telefone", "local chip", "local"]);
-              const chipCadastrado = getVal(["chip cadastrado", "chip"]);
-              const numero = getVal(["numero", "phone", "telefone"]);
-              const tipoWhatsapp = getVal(["tipo de whatsapp", "tipo whatsapp", "tipo de zap"]);
-              const aparelho = getVal(["aparelho telefone conectado", "aparelho", "dispositivo"]);
-              const perfilPc = getVal(["perfil conectado pc", "perfil pc", "perfil"]);
-              const qrCodePc = getVal(["qr code lido no pc", "qr code pc", "qr code"]);
-              const statusConexaoPc = getVal(["status conexao pc", "conexao pc", "conexao"]);
-              const statusZap = getVal(["status zap", "zap status", "status"]);
+              const id = String(row[0] || '').trim();
+              if (!id || id.toLowerCase() === 'id') continue;
+
+              const tipo = String(row[1] || '').trim();
+              const localChip = String(row[2] || '').trim();
+              const chipCadastrado = String(row[3] || '').trim();
+              const numero = String(row[4] || '').trim();
+              const tipoWhatsapp = String(row[5] || '').trim();
+              const aparelho = String(row[6] || '').trim();
+              const perfilPc = String(row[7] || '').trim();
+              const qrCodePc = String(row[8] || '').trim();
+              const statusConexaoPc = String(row[9] || '').trim();
+              const statusZap = String(row[10] || '').trim();
+              // Coluna L é a 12ª coluna (index 11) - Data de cadastro no WhatsApp
+              const dataCadastroWhatsapp = row[11] ? String(row[11]).trim() : '';
 
               const normalizedNumero = cleanPhone(numero);
 
@@ -1720,6 +1736,7 @@ export default function App() {
                 qrCodePc,
                 statusConexaoPc,
                 statusZap,
+                dataCadastroWhatsapp,
                 updatedAt: new Date().toISOString()
               };
 

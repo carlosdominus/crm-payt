@@ -250,9 +250,11 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-modern-border text-[10px] font-bold uppercase tracking-wider text-modern-secondary">
-                <th className="px-6 py-4">Número</th>
-                <th className="px-6 py-4">Tipo WhatsApp</th>
-                <th className="px-6 py-4">Aparelho / Perfil</th>
+                <th className="px-6 py-4">Número (Chave)</th>
+                <th className="px-6 py-4">Datas / Histórico</th>
+                <th className="px-6 py-4">Tipo</th>
+                <th className="px-6 py-4">Aparelho</th>
+                <th className="px-6 py-4">Perfil PC / Conexão</th>
                 <th className="px-6 py-4">Status ZAP</th>
                 <th className="px-6 py-4">Vinculado a Cliente</th>
                 <th className="px-6 py-4 text-center">Ações</th>
@@ -295,10 +297,11 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                     key={chip.id} 
                     className={cn(
                       "hover:bg-slate-50 transition-colors",
-                      isSelectedActive && "bg-modern-primary/5 hover:bg-modern-primary/5"
+                      isSelectedActive && "bg-modern-primary/5 hover:bg-modern-primary/5",
+                      statusLower === 'caiu' && "opacity-60 bg-rose-50/10"
                     )}
                   >
-                    {/* Número */}
+                    {/* Número (Chave) - Coluna E */}
                     <td className="px-6 py-4.5 font-bold text-modern-text">
                       <div className="flex flex-col">
                         <span>{chip.numero}</span>
@@ -306,20 +309,85 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                       </div>
                     </td>
 
-                    {/* Tipo WhatsApp */}
-                    <td className="px-6 py-4.5 font-medium text-modern-secondary capitalize">
-                      {chip.tipoWhatsapp || 'Não definido'}
-                    </td>
-
-                    {/* Aparelho */}
+                    {/* Datas / Histórico - Coluna D e L */}
                     <td className="px-6 py-4.5">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-modern-text">{chip.aparelho || 'Sem Aparelho'}</span>
-                        <span className="text-[10px] text-modern-secondary font-medium">{chip.localChip} • {chip.perfilPc || 'Sem perfil'}</span>
+                      <div className="flex flex-col gap-1 text-[10.5px]">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 min-w-[55px]">CHIP CAD.:</span>
+                          {chip.chipCadastrado ? (
+                            <span className="font-bold text-modern-text bg-slate-100 px-1.5 py-0.5 rounded">{chip.chipCadastrado}</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Sem registro</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-600/70 min-w-[55px]">ZAP ATIVO:</span>
+                          {chip.dataCadastroWhatsapp ? (
+                            <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">{chip.dataCadastroWhatsapp}</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Sem registro</span>
+                          )}
+                        </div>
                       </div>
                     </td>
 
-                    {/* Status ZAP */}
+                    {/* Tipo WhatsApp - Coluna F */}
+                    <td className="px-6 py-4.5">
+                      {chip.tipoWhatsapp ? (
+                        <span className={cn(
+                          "inline-block px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wide border",
+                          chip.tipoWhatsapp.toLowerCase() === 'business' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                          chip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                          chip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                          "bg-slate-50 text-slate-700 border-slate-200"
+                        )}>
+                          {chip.tipoWhatsapp}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic font-medium">Não informado</span>
+                      )}
+                    </td>
+
+                    {/* Aparelho Celular - Coluna G */}
+                    <td className="px-6 py-4.5">
+                      {chip.aparelho && chip.aparelho.toLowerCase() !== 'nenhum' ? (
+                        <span className="inline-flex items-center gap-1.5 bg-slate-50 text-modern-text border border-modern-border px-2.5 py-1 rounded-lg font-bold">
+                          <Smartphone size={12} className="text-modern-secondary" />
+                          {chip.aparelho}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic font-medium">Sem Aparelho</span>
+                      )}
+                    </td>
+
+                    {/* Perfil PC / Conexão - Coluna H e J */}
+                    <td className="px-6 py-4.5">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1 text-[11px]">
+                          <span className="font-semibold text-modern-secondary">Perfil PC:</span>
+                          {chip.perfilPc && chip.perfilPc.toLowerCase() !== 'ainda sem' && chip.perfilPc.toLowerCase() !== 'não aplica' ? (
+                            <span className="font-bold text-modern-text bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-100 font-mono">{chip.perfilPc}</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Sem perfil</span>
+                          )}
+                        </div>
+                        {chip.statusConexaoPc && (
+                          <div className="flex items-center gap-1 text-[10px]">
+                            <span className="font-semibold text-modern-secondary">Conexão:</span>
+                            <span className={cn(
+                              "font-extrabold uppercase text-[9px] px-1.5 py-0.2 rounded border",
+                              chip.statusConexaoPc.toLowerCase() === '2' || chip.statusConexaoPc.toLowerCase() === 'conectado'
+                                ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                                : "bg-rose-50 text-rose-500 border-rose-100"
+                            )}>
+                              {chip.statusConexaoPc}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Status ZAP - Coluna K */}
                     <td className="px-6 py-4.5">
                       {statusBadge}
                     </td>
@@ -346,33 +414,44 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                       <div className="flex items-center justify-center gap-2">
                         {/* Ativar chip para operação */}
                         <button
-                          onClick={() => onSetActiveChip(chip)}
+                          onClick={() => {
+                            if (statusLower === 'caiu') {
+                              alert("Este chip está com status 'Caiu' e não pode ser ativado para operação no sistema.");
+                              return;
+                            }
+                            onSetActiveChip(chip);
+                          }}
+                          disabled={statusLower === 'caiu'}
                           className={cn(
                             "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1",
                             isSelectedActive 
-                              ? "bg-modern-primary border-modern-primary text-white"
-                              : "bg-white hover:bg-slate-50 border-modern-border text-modern-secondary hover:text-modern-primary"
+                              ? "bg-modern-primary border-modern-primary text-white font-extrabold shadow-sm"
+                              : statusLower === 'caiu'
+                                ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                                : "bg-white hover:bg-slate-50 border-modern-border text-modern-secondary hover:text-modern-primary"
                           )}
                         >
                           {isSelectedActive ? <Check size={12} /> : null}
-                          {isSelectedActive ? "Usando este" : "Usar este"}
+                          {isSelectedActive ? "Usando este" : statusLower === 'caiu' ? "Indisponível" : "Usar este"}
                         </button>
 
                         {/* Contatar cliente selecionado ou outro */}
-                        {selectedClient ? (
-                          <button
-                            onClick={() => handleOpenChat(chip, selectedClient)}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
-                          >
-                            <Phone size={12} /> Falar com {selectedClient.nome.split(' ')[0]}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => setShowClientSelectorForChip(chip)}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
-                          >
-                            <User size={12} /> Escolher Contato
-                          </button>
+                        {statusLower !== 'caiu' && (
+                          selectedClient ? (
+                            <button
+                              onClick={() => handleOpenChat(chip, selectedClient)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+                            >
+                              <Phone size={12} /> Falar com {selectedClient.nome.split(' ')[0]}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setShowClientSelectorForChip(chip)}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+                            >
+                              <User size={12} /> Escolher Contato
+                            </button>
+                          )
                         )}
                       </div>
                     </td>
@@ -382,7 +461,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
 
               {filteredChips.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center text-modern-secondary">
+                  <td colSpan={8} className="px-6 py-16 text-center text-modern-secondary">
                     <Smartphone size={32} className="mx-auto mb-3 opacity-20 text-modern-secondary" />
                     <p className="text-xs font-bold uppercase tracking-wider">Nenhum chip encontrado.</p>
                     <p className="text-[11px] text-modern-secondary/60 mt-1">Sincronize com a planilha para importar novos aparelhos.</p>

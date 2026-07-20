@@ -51,6 +51,7 @@ export interface WhatsAppChip {
   statusConexaoPc: string;
   statusZap: string;
   updatedAt: string;
+  dataCadastroWhatsapp?: string;
 }
 
 export interface ManualSale {
