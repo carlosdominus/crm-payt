@@ -5120,7 +5120,7 @@ export default function App() {
                               </button>
                               
                               <div className={cn(
-                                "absolute left-1/2 -translate-x-1/2 w-72 bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
+                                "absolute left-1/2 -translate-x-1/2 w-[350px] bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
                                 idx < 10 ? "top-full mt-2" : "bottom-full mb-2"
                               )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
@@ -5171,19 +5171,32 @@ export default function App() {
                                       >
                                         <div 
                                           className={cn(
-                                            "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-1 text-center truncate",
-                                            whatsappDisplayMode === 'telefone' ? "min-w-[56px] h-6" : "w-6 h-6"
+                                            "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-2 text-center truncate",
+                                            whatsappDisplayMode === 'telefone' ? "min-w-[80px] h-6" : "w-8 h-8"
                                           )} 
                                           style={{ backgroundColor: acc.color }}
                                         >
                                           {badgeText}
                                         </div>
                                         <div className="flex flex-col min-w-0 flex-1">
-                                          <span className="truncate text-modern-text leading-none mb-1">{acc.name}</span>
+                                          <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                                            <span className="truncate text-modern-text leading-none font-bold text-[11px]">{acc.name}</span>
+                                            {matchingChip?.tipoWhatsapp && (
+                                              <span className={cn(
+                                                "px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider shrink-0 border",
+                                                matchingChip.tipoWhatsapp.toLowerCase() === 'business' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                                matchingChip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                                matchingChip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-sky-50 text-sky-700 border-sky-200" :
+                                                "bg-slate-50 text-slate-700 border-slate-200"
+                                              )}>
+                                                {matchingChip.tipoWhatsapp}
+                                              </span>
+                                            )}
+                                          </div>
                                           <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-85">
                                             {whatsappDisplayMode === 'telefone' && matchingChip
                                               ? `Nº: ${matchingChip.numero}`
-                                              : acc.origin}
+                                              : `Nº: ${acc.phoneNumber || 'Sem número'} • ${acc.origin}`}
                                           </span>
                                         </div>
                                       </button>
@@ -5397,6 +5410,8 @@ export default function App() {
         getClientTag={getClientTag}
         handleEditSale={handleEditSale}
         handleDeleteSale={handleDeleteSale}
+        whatsappDisplayMode={whatsappDisplayMode}
+        whatsappChips={whatsappChips}
       />
     )}
     </div>

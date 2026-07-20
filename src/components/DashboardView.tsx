@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { WhatsAppChip } from '../types';
 
 const cn = (...classes: (string | boolean | undefined)[]) => classes.filter(Boolean).join(' ');
 
@@ -59,6 +60,8 @@ interface DashboardViewProps {
   getClientTag: (client: Client) => string;
   handleEditSale: (sale: Sale) => void;
   handleDeleteSale: (id: string) => void;
+  whatsappDisplayMode?: 'pc' | 'telefone';
+  whatsappChips?: WhatsAppChip[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -69,7 +72,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   tagTimestamps,
   getClientTag,
   handleEditSale,
-  handleDeleteSale
+  handleDeleteSale,
+  whatsappDisplayMode = 'pc',
+  whatsappChips = []
 }) => {
   const [activeDashSubTab, setActiveDashSubTab] = useState<'vendas' | 'relatorios' | 'leads' | 'tabela' | 'conversao'>('vendas');
   const [dashDateFilter, setDashDateFilter] = useState<'7' | '15' | '30' | '60' | '90' | 'all' | 'custom'>('all');
@@ -361,25 +366,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Array.from(monthMap.values()).sort((a, b) => a.monthIndex - b.monthIndex);
   }, [filteredSalesForDash]);
 
+  const getFormattedAccountName = (acc: any) => {
+    if (!acc) return 'Não Atribuído';
+    
+    // Find matching chip
+    const matchingChip = whatsappChips.find(c => {
+      if (acc.phoneNumber) {
+        const cleanAcc = acc.phoneNumber.replace(/\D/g, '');
+        const cleanChip = c.numero ? c.numero.replace(/\D/g, '') : '';
+        if (cleanAcc && cleanChip && cleanAcc === cleanChip) return true;
+      }
+      const idStr = String(acc.identifier).trim().toLowerCase();
+      return String(c.id).trim().toLowerCase() === idStr || 
+             String(c.perfilPc).trim().toLowerCase() === idStr;
+    });
+
+    if (whatsappDisplayMode === 'pc') {
+      // ID/perfil caso eu esteja trabalhando no pc + o número
+      const num = acc.phoneNumber || matchingChip?.numero || 'Sem número';
+      const id = acc.identifier || matchingChip?.perfilPc || 'Sem Perfil';
+      return `${id} - ${num}`;
+    } else {
+      // telefone que ele ta + o tipo de zap + número de tel
+      if (matchingChip) {
+        const aparelho = matchingChip.aparelho || 'Sem Aparelho';
+        const tipo = matchingChip.tipoWhatsapp || 'Sem Tipo';
+        const num = matchingChip.numero || 'Sem número';
+        return `${aparelho} - ${tipo} - ${num}`;
+      }
+      // fallback
+      const num = acc.phoneNumber || 'Sem número';
+      const name = acc.name || 'Sem Nome';
+      return `${name} - ${num}`;
+    }
+  };
+
   const dashWhatsappDistribution = useMemo(() => {
     const distributionMap = new Map<string, number>();
     filteredClientsForDash.forEach(client => {
       const tag = getClientTag(client);
       if (tag === 'lixo') return;
       const whatsappId = client.assignedWhatsappId;
-      const account = whatsappAccounts.find(a => a.id === whatsappId);
-      const name = account ? account.name : 'Não Atribuído';
-      distributionMap.set(name, (distributionMap.get(name) || 0) + 1);
+      const key = whatsappId || 'Não Atribuído';
+      distributionMap.set(key, (distributionMap.get(key) || 0) + 1);
     });
-    return Array.from(distributionMap.entries()).map(([name, value]) => {
-      const account = whatsappAccounts.find(a => a.name === name);
+    return Array.from(distributionMap.entries()).map(([key, value]) => {
+      if (key === 'Não Atribuído') {
+        return {
+          name: 'Não Atribuído',
+          value,
+          color: '#cbd5e1'
+        };
+      }
+      const account = whatsappAccounts.find(a => a.id === key);
+      const formattedName = account ? getFormattedAccountName(account) : 'Não Atribuído';
       return { 
-         name, 
+         name: formattedName, 
          value, 
          color: account ? account.color : '#cbd5e1' 
       };
     }).sort((a, b) => b.value - a.value);
-  }, [filteredClientsForDash, whatsappAccounts, getClientTag]);
+  }, [filteredClientsForDash, whatsappAccounts, whatsappChips, whatsappDisplayMode, getClientTag]);
 
   const dashWhatsappSales = useMemo(() => {
     const salesValueMap = new Map<string, number>();
@@ -388,19 +435,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     filteredSalesForDash.forEach(sale => {
       const client = enrichedClients.find(c => c.key === sale.clientKey);
       const whatsappId = client?.assignedWhatsappId;
-      const account = whatsappAccounts.find(a => a.id === whatsappId);
-      const name = account ? account.name : 'Não Atribuído';
+      const key = whatsappId || 'Não Atribuído';
       
-      salesValueMap.set(name, (salesValueMap.get(name) || 0) + sale.value);
-      salesCountMap.set(name, (salesCountMap.get(name) || 0) + 1);
+      salesValueMap.set(key, (salesValueMap.get(key) || 0) + sale.value);
+      salesCountMap.set(key, (salesCountMap.get(key) || 0) + 1);
     });
     
-    const salesData = whatsappAccounts.map(acc => ({
-      name: acc.name,
-      value: salesValueMap.get(acc.name) || 0,
-      count: salesCountMap.get(acc.name) || 0,
-      color: acc.color
-    })).sort((a, b) => b.value - a.value);
+    const salesData = whatsappAccounts.map(acc => {
+      const formattedName = getFormattedAccountName(acc);
+      return {
+        name: formattedName,
+        value: salesValueMap.get(acc.id) || 0,
+        count: salesCountMap.get(acc.id) || 0,
+        color: acc.color
+      };
+    }).sort((a, b) => b.value - a.value);
 
     if (salesValueMap.has('Não Atribuído')) {
       salesData.push({
@@ -411,7 +460,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       });
     }
     return salesData;
-  }, [filteredSalesForDash, enrichedClients, whatsappAccounts]);
+  }, [filteredSalesForDash, enrichedClients, whatsappAccounts, whatsappChips, whatsappDisplayMode]);
 
   const dashManualSalesByProduct = useMemo(() => {
     const productMap = new Map<string, { name: string; value: number }>();
