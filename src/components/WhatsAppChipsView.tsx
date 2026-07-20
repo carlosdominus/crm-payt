@@ -123,7 +123,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
   };
 
   return (
-    <div className="px-10 py-6 flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-modern-bg space-y-6">
+    <div className="px-10 py-6 flex flex-col flex-1 min-h-0 overflow-hidden bg-modern-bg space-y-6">
       
       {/* Top Banner / Hero area */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-modern-border shadow-sm">
@@ -245,17 +245,17 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
       )}
 
       {/* Main Table */}
-      <div className="bg-white border border-modern-border rounded-2xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white border border-modern-border rounded-2xl shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+        <div className="overflow-auto custom-scrollbar flex-1">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-modern-border text-[10px] font-bold uppercase tracking-wider text-modern-secondary">
-                <th className="px-6 py-4">Número (Chave)</th>
-                <th className="px-6 py-4">Datas / Histórico</th>
-                <th className="px-6 py-4">Tipo</th>
-                <th className="px-6 py-4">Aparelho</th>
-                <th className="px-6 py-4">Perfil PC / Conexão</th>
-                <th className="px-6 py-4">Status ZAP</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Número (Chave)</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Datas / Histórico</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Tipo</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Aparelho</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Perfil PC / Conexão</th>
+                <th className="sticky top-0 bg-slate-50 z-10 px-6 py-4">Status ZAP</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">

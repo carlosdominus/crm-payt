@@ -2465,7 +2465,21 @@ export default function App() {
     setRefreshing(true);
     setFetchError(null);
     try {
-      const response = await fetch(sheetCsvUrl || SHEET_CSV_URL);
+      let response;
+      const targetUrl = sheetCsvUrl || SHEET_CSV_URL;
+      try {
+        response = await fetch(targetUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch sheet directly. Status: ${response.status}`);
+        }
+      } catch (directErr) {
+        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxy...", directErr);
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        response = await fetch(proxyUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch sheet via CORS proxy. Status: ${response.status}`);
+        }
+      }
       const csvText = await response.text();
       
       Papa.parse(csvText, {
