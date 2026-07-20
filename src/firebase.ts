@@ -10,7 +10,8 @@ import {
   query, 
   orderBy,
   where,
-  getDocFromServer
+  getDocFromServer,
+  getDocs
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -34,7 +35,8 @@ export {
   query, 
   orderBy,
   where,
-  getDocFromServer
+  getDocFromServer,
+  getDocs
 };
 export type { User };
 

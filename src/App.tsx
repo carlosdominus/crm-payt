@@ -58,6 +58,7 @@ import {
   orderBy,
   where,
   getDocFromServer,
+  getDocs,
   User,
   handleFirestoreError,
   OperationType
@@ -1717,6 +1718,13 @@ export default function App() {
               return;
             }
 
+            // Buscar contas existentes para evitar duplicados e sincronizar o status
+            const accountsSnapshot = await getDocs(collection(db, `users/${effectiveWorkspaceId}/whatsappAccounts`));
+            const existingAccounts = accountsSnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            })) as WhatsAppAccount[];
+
             // A primeira linha é de cabeçalho, vamos pular
             const dataRows = rows.slice(1);
             let importCount = 0;
@@ -1762,10 +1770,57 @@ export default function App() {
               const docRef = doc(db, `users/${effectiveWorkspaceId}/whatsappChips`, id);
               await setDoc(docRef, chipData);
               importCount++;
+
+              // Auto-criar ou atualizar conta de WhatsApp para este chip
+              const matchingAccount = existingAccounts.find(acc => {
+                if (acc.phoneNumber && normalizedNumero) {
+                  const cleanAcc = cleanPhone(acc.phoneNumber);
+                  if (cleanAcc && cleanAcc === normalizedNumero) return true;
+                }
+                const idStr = String(acc.identifier).trim().toLowerCase();
+                return idStr === String(id).trim().toLowerCase() ||
+                       idStr === String(perfilPc).trim().toLowerCase();
+              });
+
+              const isChipCaiu = statusZap.toLowerCase() === 'caiu';
+
+              if (!matchingAccount) {
+                // Selecionar uma cor descritiva e diferente baseada no id
+                const colors = ["#25D366", "#3b82f6", "#f59e0b", "#ec4899", "#8b5cf6", "#10b981", "#ef4444", "#06b6d4"];
+                const colorIdx = parseInt(id, 10);
+                const color = isNaN(colorIdx) ? "#25D366" : (colors[colorIdx % colors.length] || "#25D366");
+
+                const newAccId = `acc_${id}`;
+                const newAcc: WhatsAppAccount = {
+                  id: newAccId,
+                  name: `${aparelho || 'Chip'} (${perfilPc || id})`,
+                  identifier: perfilPc || id,
+                  color,
+                  phoneNumber: numero,
+                  origin: tipo || "Geral",
+                  isActive: !isChipCaiu
+                };
+
+                await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, newAccId), {
+                  ...newAcc,
+                  createdAt: new Date().toISOString()
+                }, { merge: true });
+              } else {
+                // Atualizar se está ativa/inativa dependendo do statusZap
+                if (isChipCaiu && matchingAccount.isActive) {
+                  await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, matchingAccount.id), {
+                    isActive: false
+                  }, { merge: true });
+                } else if (!isChipCaiu && !matchingAccount.isActive) {
+                  await setDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, matchingAccount.id), {
+                    isActive: true
+                  }, { merge: true });
+                }
+              }
             }
             
-            console.log(`Successfully synced ${importCount} chips!`);
-            alert(`Sincronização concluída com sucesso! ${importCount} aparelhos WhatsApp foram importados/atualizados.`);
+            console.log(`Successfully synced ${importCount} chips and verified auto-accounts!`);
+            alert(`Sincronização concluída com sucesso! ${importCount} aparelhos WhatsApp foram importados/atualizados e integrados como contas disponíveis.`);
           } catch (callbackErr: any) {
             console.error("Error writing chips to Firestore:", callbackErr);
             alert(`Erro ao salvar chips no Firestore: ${callbackErr?.message || callbackErr}`);
