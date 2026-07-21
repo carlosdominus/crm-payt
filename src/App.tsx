@@ -268,14 +268,31 @@ export const cleanDeviceName = (name: string): string => {
 
 export const getDeviceStyleColor = (name: string): string => {
   const lower = name.toLowerCase();
-  if (lower.includes("iphone") || lower.includes("apple")) {
+  if (lower.includes("iphone") || lower.includes("apple") || lower.includes("ip") || lower.includes("ihpne")) {
     return "#64748b"; // Cinza
   }
   if (lower.includes("carlos")) {
     return "#1e3a8a"; // Azul Escuro
   }
-  // Default azul para outros (Samsung Galaxy S5, Moto G5, Samsung A5, etc.)
+  if (lower.includes("moto") || lower.includes("g5") || lower.includes("motorola") || lower.includes("motog5")) {
+    return "#eab308"; // Amarelo
+  }
+  // Default azul para outros (Samsung Galaxy S5, Samsung A5, etc.)
   return "#3b82f6"; // Azul
+};
+
+export const getDeviceSortOrder = (name: string): number => {
+  const lower = name.toLowerCase();
+  if (lower.includes("samsung") || lower.includes("carlos") || lower.includes("galaxy") || lower.includes("a5")) {
+    return 1; // Samsung primeiro
+  }
+  if (lower.includes("iphone") || lower.includes("apple") || lower.includes("ip") || lower.includes("ihpne")) {
+    return 2; // iPhone segundo
+  }
+  if (lower.includes("moto") || lower.includes("g5") || lower.includes("motorola") || lower.includes("motog5")) {
+    return 3; // MotoG terceiro
+  }
+  return 4; // Outros
 };
 
 const findMatchingChip = (acc: WhatsAppAccount, chips: WhatsAppChip[]): WhatsAppChip | undefined => {
@@ -1103,6 +1120,19 @@ export default function App() {
 
   const sortedWhatsappAccounts = useMemo(() => {
     return [...whatsappAccounts].sort((a, b) => {
+      const matchingChipA = findMatchingChip(a, whatsappChips);
+      const nameA = matchingChipA?.aparelho || a.name;
+      
+      const matchingChipB = findMatchingChip(b, whatsappChips);
+      const nameB = matchingChipB?.aparelho || b.name;
+
+      const orderA = getDeviceSortOrder(nameA);
+      const orderB = getDeviceSortOrder(nameB);
+
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+
       const idA = parseInt(a.identifier, 10);
       const idB = parseInt(b.identifier, 10);
       if (!isNaN(idA) && !isNaN(idB)) {
@@ -1110,7 +1140,7 @@ export default function App() {
       }
       return (a.identifier || '').localeCompare(b.identifier || '');
     });
-  }, [whatsappAccounts]);
+  }, [whatsappAccounts, whatsappChips]);
 
   const activeWhatsappAccounts = useMemo(() => {
     const active = sortedWhatsappAccounts.filter(acc => {
@@ -1150,7 +1180,8 @@ export default function App() {
       }
 
       // If we have an identifier (like PC profile 1, 2...), check if we've seen it for the same type (origin)
-      if (ident) {
+      // BUT do NOT deduplicate if it's '0' (which represents "Ainda Sem" PC profile placeholder)
+      if (ident && ident !== '0') {
         const typeKey = `${acc.origin || ''}_${ident}`.toLowerCase().trim();
         if (seenIdentifiers.has(typeKey)) {
           continue; // skip duplicate
@@ -1161,8 +1192,21 @@ export default function App() {
       deduped.push(acc);
     }
 
-    // Return in the original sorted order (or just sorted by identifier as before)
+    // Return sorted organized by device group, then by identifier
     return deduped.sort((a, b) => {
+      const matchingChipA = findMatchingChip(a, whatsappChips);
+      const nameA = matchingChipA?.aparelho || a.name;
+      
+      const matchingChipB = findMatchingChip(b, whatsappChips);
+      const nameB = matchingChipB?.aparelho || b.name;
+
+      const orderA = getDeviceSortOrder(nameA);
+      const orderB = getDeviceSortOrder(nameB);
+
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+
       const idA = parseInt(a.identifier, 10);
       const idB = parseInt(b.identifier, 10);
       if (!isNaN(idA) && !isNaN(idB)) {
@@ -1927,6 +1971,42 @@ export default function App() {
                 ...newAcc,
                 createdAt: new Date().toISOString()
               }, { merge: true });
+
+              // Automatic duplicate/manual account cleanup and client assignment migration
+              if (normalizedNumero) {
+                const manualDuplicates = existingAccounts.filter(acc => 
+                  !acc.id.startsWith('acc_') && 
+                  cleanPhone(acc.phoneNumber) === normalizedNumero
+                );
+
+                for (const manualAcc of manualDuplicates) {
+                  try {
+                    console.log(`Migrating assignments from manual account ${manualAcc.id} to synced account ${newAccId}...`);
+                    
+                    // Migrate client assignments in Firestore
+                    const clientSnap = await getDocs(
+                      query(
+                        collection(db, `users/${effectiveWorkspaceId}/clientData`),
+                        where('assignedWhatsappId', '==', manualAcc.id)
+                      )
+                    );
+                    
+                    for (const clientDoc of clientSnap.docs) {
+                      await setDoc(
+                        doc(db, `users/${effectiveWorkspaceId}/clientData`, clientDoc.id), 
+                        { assignedWhatsappId: newAccId }, 
+                        { merge: true }
+                      );
+                    }
+                    
+                    // Delete the obsolete manual account
+                    await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, manualAcc.id));
+                    console.log(`Deleted manual account ${manualAcc.id}`);
+                  } catch (err) {
+                    console.error(`Failed to migrate/cleanup manual account ${manualAcc.id}:`, err);
+                  }
+                }
+              }
             }
 
             // Excluir contas antigas auto-geradas (que começam com 'acc_') que não estão mais presentes na planilha
