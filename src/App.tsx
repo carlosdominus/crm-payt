@@ -257,6 +257,27 @@ export const formatPerfilPc = (perfil?: string): string => {
   return perfil;
 };
 
+export const cleanDeviceName = (name: string): string => {
+  if (!name) return "";
+  const idx = name.indexOf('(');
+  if (idx !== -1) {
+    return name.substring(0, idx).trim();
+  }
+  return name.trim();
+};
+
+export const getDeviceStyleColor = (name: string): string => {
+  const lower = name.toLowerCase();
+  if (lower.includes("iphone") || lower.includes("apple")) {
+    return "#64748b"; // Cinza
+  }
+  if (lower.includes("carlos")) {
+    return "#1e3a8a"; // Azul Escuro
+  }
+  // Default azul para outros (Samsung Galaxy S5, Moto G5, Samsung A5, etc.)
+  return "#3b82f6"; // Azul
+};
+
 const findMatchingChip = (acc: WhatsAppAccount, chips: WhatsAppChip[]): WhatsAppChip | undefined => {
   if (!acc || !chips) return undefined;
   
@@ -5400,19 +5421,13 @@ export default function App() {
                                     return filtered.map(acc => {
                                       const matchingChip = findMatchingChip(acc, whatsappChips);
                                       const tipoWhatsapp = matchingChip?.tipoWhatsapp || 'Pessoal';
-                                      const tipoWhatsappLower = tipoWhatsapp.toLowerCase().trim();
                                       
-                                      const firstTextRaw = whatsappDisplayMode === 'telefone'
-                                        ? (matchingChip?.aparelho || acc.name)
-                                        : (matchingChip?.perfilPc || acc.identifier || acc.name);
-                                      
-                                      const firstText = formatPerfilPc(firstTextRaw);
+                                      const isTelefoneMode = whatsappDisplayMode === 'telefone';
+                                      const firstText = isTelefoneMode
+                                        ? cleanDeviceName(matchingChip?.aparelho || acc.name)
+                                        : formatPerfilPc(matchingChip?.perfilPc || acc.identifier || acc.name);
                                         
                                       const phoneText = matchingChip?.numero || acc.phoneNumber || 'Sem número';
-                                      
-                                      const numBgColor = tipoWhatsappLower === 'business' ? '#25D366' :
-                                                         tipoWhatsappLower === 'pessoal' ? '#eab308' :
-                                                         tipoWhatsappLower === 'dual' ? '#38bdf8' : '#25D366';
 
                                       return (
                                         <button 
@@ -5422,29 +5437,54 @@ export default function App() {
                                             updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
                                           }}
                                           className={cn(
-                                            "w-full text-left px-4 py-3 text-[10px] font-bold hover:bg-slate-50 flex items-center justify-between border-b border-modern-border/30 transition-colors gap-3",
+                                            "w-full text-left px-4 py-3 border-b border-modern-border/30 transition-colors hover:bg-slate-50",
                                             client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
                                           )}
                                         >
-                                          <div className="flex items-center gap-3 min-w-0">
-                                            {/* 1º: Aparelho (Telefone) ou Perfil (PC) */}
-                                            <span className="font-bold text-modern-text text-[11px] truncate max-w-[140px]" title={firstText}>
-                                              {firstText}
-                                            </span>
-                                            
-                                            {/* 2º: Número com background correspondente */}
-                                            <span 
-                                              className="px-2 py-0.5 text-[10px] font-black text-white rounded font-mono shrink-0 select-all"
-                                              style={{ backgroundColor: numBgColor }}
-                                            >
-                                              {phoneText}
-                                            </span>
-                                          </div>
-                                          
-                                          {/* 3º: Ao lado direito, tipo de whatsapp */}
-                                          <span className="text-[8px] font-black uppercase tracking-wider text-modern-secondary border border-modern-border/50 px-1.5 py-0.5 rounded bg-white shrink-0">
-                                            {tipoWhatsapp}
-                                          </span>
+                                          {isTelefoneMode ? (
+                                            /* Telefone Mode: Device Name badge (col 1), Black phone number (col 2), Colored type tag (col 3) */
+                                            <div className="grid grid-cols-[130px_1fr_80px] gap-3 items-center w-full">
+                                              <span 
+                                                className="px-2 py-1 text-[10px] font-black text-white rounded shadow-sm text-center truncate min-w-0"
+                                                style={{ backgroundColor: getDeviceStyleColor(firstText) }}
+                                                title={firstText}
+                                              >
+                                                {firstText}
+                                              </span>
+                                              
+                                              <span className="text-slate-950 font-bold text-[11px] font-mono select-all truncate text-center">
+                                                {phoneText}
+                                              </span>
+                                              
+                                              <span 
+                                                className="text-[9px] font-black uppercase tracking-wider text-white px-2 py-1 rounded shadow-sm text-center min-w-0"
+                                                style={{ backgroundColor: getWhatsAppTypeColor(tipoWhatsapp) }}
+                                              >
+                                                {tipoWhatsapp}
+                                              </span>
+                                            </div>
+                                          ) : (
+                                            /* PC Mode: Colored square with ID (col 1), Black phone number (col 2), Colored type tag (col 3) */
+                                            <div className="grid grid-cols-[30px_1fr_80px] gap-3 items-center w-full">
+                                              <span 
+                                                className="w-7 h-7 flex items-center justify-center rounded text-white font-black text-[11px] font-mono shrink-0 shadow-sm"
+                                                style={{ backgroundColor: getWhatsAppTypeColor(tipoWhatsapp) }}
+                                              >
+                                                {firstText}
+                                              </span>
+                                              
+                                              <span className="text-slate-950 font-bold text-[11px] font-mono select-all truncate text-center">
+                                                {phoneText}
+                                              </span>
+                                              
+                                              <span 
+                                                className="text-[9px] font-black uppercase tracking-wider text-white px-2 py-1 rounded shadow-sm text-center min-w-0"
+                                                style={{ backgroundColor: getWhatsAppTypeColor(tipoWhatsapp) }}
+                                              >
+                                                {tipoWhatsapp}
+                                              </span>
+                                            </div>
+                                          )}
                                         </button>
                                       );
                                     });
