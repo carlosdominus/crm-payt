@@ -104,7 +104,8 @@ export const NUTRA_PRODUCTS = [
 
 const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
 
-export const getDeviceColor = (aparelho?: string): string => {
+export const getDeviceColor = (aparelho?: string, tipoWhatsapp?: string): string => {
+  if (tipoWhatsapp?.toLowerCase().trim().includes("business")) return "#25D366"; // WhatsApp green for Business accounts
   if (!aparelho) return "#25D366";
   const lower = aparelho.toLowerCase().trim();
   if (lower.includes("moto g5") || lower.includes("g5")) return "#eab308"; // Yellow
@@ -1066,7 +1067,7 @@ export default function App() {
   }, [whatsappAccounts]);
 
   const activeWhatsappAccounts = useMemo(() => {
-    return sortedWhatsappAccounts.filter(acc => {
+    const active = sortedWhatsappAccounts.filter(acc => {
       if (acc.isActive === false) return false;
       
       // Se houver um chip correspondente sincronizado com a planilha Dominus
@@ -1077,6 +1078,53 @@ export default function App() {
         return false;
       }
       return true;
+    });
+
+    // Deduplicate: If there are multiple active accounts with the same phone number or identifier/name,
+    // we prefer the synced one (where id starts with 'acc_').
+    const seenPhones = new Set<string>();
+    const seenIdentifiers = new Set<string>();
+    const deduped: WhatsAppAccount[] = [];
+
+    // Prioritize synced accounts by sorting them first for the deduplication pass
+    const sortedForDedup = [...active].sort((a, b) => {
+      const aSynced = a.id.startsWith('acc_') ? 1 : 0;
+      const bSynced = b.id.startsWith('acc_') ? 1 : 0;
+      return bSynced - aSynced; // Synced first
+    });
+
+    for (const acc of sortedForDedup) {
+      const cleanNum = cleanPhone(acc.phoneNumber);
+      const ident = (acc.identifier || '').trim().toLowerCase();
+
+      // If we have a valid phone number, check if we've seen it
+      if (cleanNum && isValidPhone(acc.phoneNumber)) {
+        if (seenPhones.has(cleanNum)) {
+          continue; // skip duplicate
+        }
+        seenPhones.add(cleanNum);
+      }
+
+      // If we have an identifier (like PC profile 1, 2...), check if we've seen it for the same type (origin)
+      if (ident) {
+        const typeKey = `${acc.origin || ''}_${ident}`.toLowerCase().trim();
+        if (seenIdentifiers.has(typeKey)) {
+          continue; // skip duplicate
+        }
+        seenIdentifiers.add(typeKey);
+      }
+
+      deduped.push(acc);
+    }
+
+    // Return in the original sorted order (or just sorted by identifier as before)
+    return deduped.sort((a, b) => {
+      const idA = parseInt(a.identifier, 10);
+      const idB = parseInt(b.identifier, 10);
+      if (!isNaN(idA) && !isNaN(idB)) {
+        return idA - idB;
+      }
+      return (a.identifier || '').localeCompare(b.identifier || '');
     });
   }, [sortedWhatsappAccounts, whatsappChips]);
 
@@ -1811,7 +1859,7 @@ export default function App() {
 
               const isChipCaiu = statusZap.toLowerCase() === 'caiu';
               const isActive = !isChipCaiu;
-              const deviceColor = getDeviceColor(aparelho);
+              const deviceColor = getDeviceColor(aparelho, tipoWhatsapp);
 
               // Determine a highly descriptive, readable name for the synchronized account
               let generatedName = "";
@@ -5266,7 +5314,8 @@ export default function App() {
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? { 
                                   backgroundColor: getDeviceColor(
-                                    findMatchingChip(assignedAcc, whatsappChips)?.aparelho || assignedAcc.color
+                                    findMatchingChip(assignedAcc, whatsappChips)?.aparelho || assignedAcc.color,
+                                    findMatchingChip(assignedAcc, whatsappChips)?.tipoWhatsapp
                                   )
                                 } : {}}
                               >
@@ -5305,34 +5354,49 @@ export default function App() {
                                       Remover Atribuição
                                     </button>
                                   )}
-                                  {activeWhatsappAccounts.map(acc => {
-                                    const matchingChip = findMatchingChip(acc, whatsappChips);
+                                  {activeWhatsappAccounts
+                                    .filter(acc => {
+                                      const matchingChip = findMatchingChip(acc, whatsappChips);
+                                      const type = (matchingChip?.tipo || acc.origin || '').toLowerCase().trim();
+                                      if (whatsappDisplayMode === 'pc') {
+                                        return type === 'pc';
+                                      } else {
+                                        return type === 'telefone';
+                                      }
+                                    })
+                                    .map(acc => {
+                                      const matchingChip = findMatchingChip(acc, whatsappChips);
 
-                                    const badgeText = (whatsappDisplayMode === 'telefone' && matchingChip)
-                                      ? (matchingChip.aparelho || "Sem Tel")
-                                      : acc.identifier;
+                                      const badgeText = (whatsappDisplayMode === 'telefone' && matchingChip)
+                                        ? (matchingChip.aparelho || "Sem Tel")
+                                        : acc.identifier;
 
-                                    return (
-                                      <button 
-                                        key={acc.id}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
-                                        }}
-                                        className={cn(
-                                          "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
-                                          client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
-                                        )}
-                                      >
-                                        <div 
+                                      return (
+                                        <button 
+                                          key={acc.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
+                                          }}
                                           className={cn(
-                                            "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-2 text-center truncate",
-                                            whatsappDisplayMode === 'telefone' ? "min-w-[80px] h-6" : "w-8 h-8"
-                                          )} 
-                                          style={{ backgroundColor: getDeviceColor(matchingChip?.aparelho || acc.color) }}
+                                            "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
+                                            client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
+                                          )}
                                         >
-                                          {badgeText}
-                                        </div>
+                                          <div 
+                                            className={cn(
+                                              "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-2 text-center truncate",
+                                              whatsappDisplayMode === 'telefone' ? "min-w-[80px] h-6" : "w-8 h-8"
+                                            )} 
+                                            style={{ 
+                                              backgroundColor: getDeviceColor(
+                                                matchingChip?.aparelho || acc.color,
+                                                matchingChip?.tipoWhatsapp
+                                              ) 
+                                            }}
+                                          >
+                                            {badgeText}
+                                          </div>
                                         <div className="flex flex-col min-w-0 flex-1">
                                           <div className="flex items-center gap-1.5 mb-1 min-w-0">
                                             <span className="truncate text-modern-text leading-none font-bold text-[11px]">{acc.name}</span>
@@ -6597,7 +6661,12 @@ export default function App() {
                               <div className="flex items-start gap-4 min-w-0 flex-1">
                                 <div 
                                   className="w-10 h-10 flex items-center justify-center text-white shrink-0 shadow-sm font-black text-xs rounded-lg"
-                                  style={{ backgroundColor: getDeviceColor(matchingChip?.aparelho || acc.color) }}
+                                  style={{ 
+                                    backgroundColor: getDeviceColor(
+                                      matchingChip?.aparelho || acc.color,
+                                      matchingChip?.tipoWhatsapp
+                                    ) 
+                                  }}
                                 >
                                   <span>{acc.identifier}</span>
                                 </div>
