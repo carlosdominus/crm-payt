@@ -1133,6 +1133,12 @@ export default function App() {
         return orderA - orderB;
       }
 
+      // Keep identical device models grouped together (e.g. all "Samsung Carlos", then all "Samsung A5")
+      const nameComp = (nameA || '').localeCompare(nameB || '');
+      if (nameComp !== 0) {
+        return nameComp;
+      }
+
       const idA = parseInt(a.identifier, 10);
       const idB = parseInt(b.identifier, 10);
       if (!isNaN(idA) && !isNaN(idB)) {
@@ -1143,14 +1149,8 @@ export default function App() {
   }, [whatsappAccounts, whatsappChips]);
 
   const activeWhatsappAccounts = useMemo(() => {
+    // Accounts are assignable as long as they are active, even if the physical connection is temporarily down ("Caiu")
     const active = sortedWhatsappAccounts.filter(acc => {
-      const matchingChip = findMatchingChip(acc, whatsappChips);
-      
-      // If it is linked to a sheet chip, strictly require statusZap to be 'ativo' (Column K)
-      if (matchingChip) {
-        return (matchingChip.statusZap || '').trim().toLowerCase() === 'ativo';
-      }
-      
       return acc.isActive !== false;
     });
 
@@ -1192,7 +1192,7 @@ export default function App() {
       deduped.push(acc);
     }
 
-    // Return sorted organized by device group, then by identifier
+    // Return sorted organized by device group, then by model, then by identifier
     return deduped.sort((a, b) => {
       const matchingChipA = findMatchingChip(a, whatsappChips);
       const nameA = matchingChipA?.aparelho || a.name;
@@ -1205,6 +1205,11 @@ export default function App() {
 
       if (orderA !== orderB) {
         return orderA - orderB;
+      }
+
+      const nameComp = (nameA || '').localeCompare(nameB || '');
+      if (nameComp !== 0) {
+        return nameComp;
       }
 
       const idA = parseInt(a.identifier, 10);
@@ -1785,7 +1790,7 @@ export default function App() {
 
     const q = query(collection(db, `users/${effectiveWorkspaceId}/whatsappAccounts`), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const accounts = snapshot.docs.map(doc => doc.data() as WhatsAppAccount);
+      const accounts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as WhatsAppAccount);
       setWhatsappAccounts(accounts);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/whatsappAccounts`);
@@ -1802,7 +1807,7 @@ export default function App() {
 
     const q = collection(db, `users/${effectiveWorkspaceId}/whatsappChips`);
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const chips = snapshot.docs.map(doc => doc.data() as WhatsAppChip);
+      const chips = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as WhatsAppChip);
       setWhatsappChips(chips);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `users/${effectiveWorkspaceId}/whatsappChips`);
@@ -1833,6 +1838,68 @@ export default function App() {
       }
     }
   }, [whatsappChips, activeWhatsappChip]);
+
+  // Self-healing check to automatically unify duplicate manual accounts with synced WhatsApp accounts
+  const [healedManualIds] = useState(() => new Set<string>());
+
+  useEffect(() => {
+    if (!authReady || !effectiveWorkspaceId || whatsappAccounts.length === 0) return;
+
+    const runSelfHealing = async () => {
+      const manualAccounts = whatsappAccounts.filter(acc => !acc.id.startsWith('acc_'));
+      const syncedAccounts = whatsappAccounts.filter(acc => acc.id.startsWith('acc_'));
+
+      for (const manualAcc of manualAccounts) {
+        if (!manualAcc.phoneNumber || healedManualIds.has(manualAcc.id)) continue;
+        
+        const manualClean = cleanPhone(manualAcc.phoneNumber);
+        if (!manualClean) continue;
+
+        // Find a synced account with the same phone number
+        const matchedSynced = syncedAccounts.find(synced => {
+          const syncedClean = cleanPhone(synced.phoneNumber);
+          return syncedClean === manualClean || 
+                 (syncedClean.length === 11 && manualClean.length === 11 && 
+                  syncedClean.substring(2) === manualClean.substring(2)) ||
+                 (syncedClean.replace(/^55/, '') === manualClean.replace(/^55/, ''));
+        });
+
+        if (matchedSynced) {
+          healedManualIds.add(manualAcc.id);
+          console.log(`[Self-Healing] Found duplicate manual account: ${manualAcc.name} (${manualAcc.phoneNumber}) -> Synced account: ${matchedSynced.name}`);
+          
+          try {
+            // 1. Migrate client assignments
+            const clientSnap = await getDocs(
+              query(
+                collection(db, `users/${effectiveWorkspaceId}/clientData`),
+                where('assignedWhatsappId', '==', manualAcc.id)
+              )
+            );
+
+            if (!clientSnap.empty) {
+              console.log(`[Self-Healing] Migrating ${clientSnap.size} clients from manual account ${manualAcc.id} to synced account ${matchedSynced.id}...`);
+              for (const clientDoc of clientSnap.docs) {
+                await setDoc(
+                  doc(db, `users/${effectiveWorkspaceId}/clientData`, clientDoc.id),
+                  { assignedWhatsappId: matchedSynced.id },
+                  { merge: true }
+                );
+              }
+            }
+
+            // 2. Delete manual account
+            await deleteDoc(doc(db, `users/${effectiveWorkspaceId}/whatsappAccounts`, manualAcc.id));
+            console.log(`[Self-Healing] Deleted obsolete manual account ${manualAcc.id}`);
+          } catch (err) {
+            console.error(`[Self-Healing] Failed to auto-cleanup manual account ${manualAcc.id}:`, err);
+          }
+        }
+      }
+    };
+
+    runSelfHealing();
+  }, [authReady, effectiveWorkspaceId, whatsappAccounts, healedManualIds]);
 
   const syncWhatsappChips = async () => {
     if (!user || !effectiveWorkspaceId) return;
