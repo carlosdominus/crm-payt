@@ -250,6 +250,13 @@ export const getWhatsAppTypeColor = (tipoWhatsapp?: string): string => {
   return "#25D366"; // Default
 };
 
+export const formatPerfilPc = (perfil?: string): string => {
+  if (!perfil) return "";
+  const cleaned = perfil.trim().toLowerCase();
+  if (cleaned === 'ainda sem') return '0';
+  return perfil;
+};
+
 const findMatchingChip = (acc: WhatsAppAccount, chips: WhatsAppChip[]): WhatsAppChip | undefined => {
   if (!acc || !chips) return undefined;
   
@@ -1839,7 +1846,8 @@ export default function App() {
               const numero = String(row[4] || '').trim();
               const tipoWhatsapp = String(row[5] || '').trim();
               const aparelho = String(row[6] || '').trim();
-              const perfilPc = String(row[7] || '').trim();
+              const rawPerfilPc = String(row[7] || '').trim();
+              const perfilPc = formatPerfilPc(rawPerfilPc);
               const qrCodePc = String(row[8] || '').trim();
               const statusConexaoPc = String(row[9] || '').trim();
               const statusZap = String(row[10] || '').trim();
@@ -5338,7 +5346,7 @@ export default function App() {
                                     if (whatsappDisplayMode === 'telefone') {
                                       return (matchingChip?.aparelho || assignedAcc.name);
                                     } else {
-                                      return (matchingChip?.perfilPc || assignedAcc.identifier);
+                                      return formatPerfilPc(matchingChip?.perfilPc || assignedAcc.identifier);
                                     }
                                   })()
                                 ) : (
@@ -5369,24 +5377,36 @@ export default function App() {
                                       Remover Atribuição
                                     </button>
                                   )}
-                                  {activeWhatsappAccounts
-                                    .filter(acc => {
+                                  {(() => {
+                                    const isInfoProduct = INFO_PRODUCTS.some(p => p.name.toLowerCase() === client.product?.toLowerCase());
+                                    const isNutraProduct = NUTRA_PRODUCTS.some(p => p.name.toLowerCase() === client.product?.toLowerCase());
+                                    
+                                    let filtered = activeWhatsappAccounts.filter(acc => {
                                       const matchingChip = findMatchingChip(acc, whatsappChips);
                                       const type = (matchingChip?.tipo || acc.origin || '').toLowerCase().trim();
-                                      if (whatsappDisplayMode === 'pc') {
-                                        return type === 'pc';
-                                      } else {
-                                        return type === 'telefone';
+                                      if (isInfoProduct) {
+                                        return type.includes("info") || type.includes("infoproduto");
                                       }
-                                    })
-                                    .map(acc => {
+                                      if (isNutraProduct) {
+                                        return type.includes("nutra");
+                                      }
+                                      return true;
+                                    });
+
+                                    if (filtered.length === 0) {
+                                      filtered = activeWhatsappAccounts;
+                                    }
+
+                                    return filtered.map(acc => {
                                       const matchingChip = findMatchingChip(acc, whatsappChips);
                                       const tipoWhatsapp = matchingChip?.tipoWhatsapp || 'Pessoal';
                                       const tipoWhatsappLower = tipoWhatsapp.toLowerCase().trim();
                                       
-                                      const firstText = whatsappDisplayMode === 'telefone'
+                                      const firstTextRaw = whatsappDisplayMode === 'telefone'
                                         ? (matchingChip?.aparelho || acc.name)
                                         : (matchingChip?.perfilPc || acc.identifier || acc.name);
+                                      
+                                      const firstText = formatPerfilPc(firstTextRaw);
                                         
                                       const phoneText = matchingChip?.numero || acc.phoneNumber || 'Sem número';
                                       
@@ -5427,7 +5447,8 @@ export default function App() {
                                           </span>
                                         </button>
                                       );
-                                    })}
+                                    });
+                                  })()}
                                   {activeWhatsappAccounts.length === 0 && (
                                     <div className="px-4 py-8 text-[10px] text-modern-secondary text-center italic font-bold bg-slate-50/50 uppercase tracking-widest">
                                       Nenhum Zap cadastrado.
@@ -6675,7 +6696,7 @@ export default function App() {
                                     ) 
                                   }}
                                 >
-                                  <span>{acc.identifier}</span>
+                                  <span>{formatPerfilPc(acc.identifier)}</span>
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap mb-1">
@@ -6742,7 +6763,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center justify-between">
                                   <span>Aparelho:</span>
-                                  <span className="text-modern-text">{matchingChip.aparelho || 'N/A'} (Perfil {matchingChip.perfilPc || 'N/A'})</span>
+                                  <span className="text-modern-text">{matchingChip.aparelho || 'N/A'} (Perfil {formatPerfilPc(matchingChip.perfilPc) || 'N/A'})</span>
                                 </div>
                                 <div className="flex items-center justify-between">
                                   <span>Conexão PC:</span>
