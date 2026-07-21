@@ -105,7 +105,12 @@ export const NUTRA_PRODUCTS = [
 const MANUAL_PRODUCTS = [...INFO_PRODUCTS, ...NUTRA_PRODUCTS];
 
 export const getDeviceColor = (aparelho?: string, tipoWhatsapp?: string): string => {
-  if (tipoWhatsapp?.toLowerCase().trim().includes("business")) return "#25D366"; // WhatsApp green for Business accounts
+  if (tipoWhatsapp) {
+    const tw = tipoWhatsapp.toLowerCase().trim();
+    if (tw.includes("business")) return "#25D366"; // Green
+    if (tw.includes("pessoal") || tw.includes("pesssoal")) return "#eab308"; // Yellow
+    if (tw.includes("dual")) return "#38bdf8"; // Light Blue
+  }
   if (!aparelho) return "#25D366";
   const lower = aparelho.toLowerCase().trim();
   if (lower.includes("moto g5") || lower.includes("g5")) return "#eab308"; // Yellow
@@ -197,22 +202,18 @@ const cleanPhone = (phone: string): string => {
   let cleaned = phone.replace(/\D/g, '');
   
   // Handle double DDI (5555...)
-  // If it starts with 5555 and is long, it's likely a double DDI
   if (cleaned.startsWith('5555') && cleaned.length >= 14) {
     cleaned = cleaned.substring(2);
   }
   
-  // Ensure it starts with 55 if it's a Brazilian number (10 or 11 digits without DDI)
-  if (cleaned.length === 10 || cleaned.length === 11) {
-    if (!cleaned.startsWith('55')) {
-      cleaned = '55' + cleaned;
-    } else {
-      // If it starts with 55 and has 11 digits, it could be DDD 55 + 9 digits (total 11)
-      // or it could be DDI 55 + DDD + 7 digits (total 11 - invalid).
-      // In Brazil, if it's 11 digits and starts with 55, it's almost always DDD 55 + 9 digits.
-      // So we add 55 DDI.
-      cleaned = '55' + cleaned;
-    }
+  // If it starts with 55 (DDI) and is 12 or 13 digits, strip the 55 prefix to get DDD + number
+  if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
+    cleaned = cleaned.substring(2);
+  }
+  
+  // If it's 10 digits (DDD + 8 digits), insert '9' after the first 2 digits (DDD) to convert to 11 digits
+  if (cleaned.length === 10) {
+    cleaned = cleaned.substring(0, 2) + '9' + cleaned.substring(2);
   }
   
   return cleaned;
@@ -220,16 +221,33 @@ const cleanPhone = (phone: string): string => {
 
 const isValidPhone = (phone: string): boolean => {
   const cleaned = cleanPhone(phone);
-  // Brazilian numbers with DDI: 55 + DDD (2) + Number (8 or 9)
-  // Mobile: 55 + DDD + 9XXXXXXXX (13 digits)
-  // Landline or Mobile without the extra 9: 55 + DDD + XXXXXXXX (12 digits)
-  if (cleaned.length === 13) {
-    return cleaned.startsWith('55') && cleaned[4] === '9';
+  // An 11-digit Brazilian mobile number (DDD + 9XXXXXXXX)
+  return cleaned.length === 11;
+};
+
+export const findWhatsAppAccount = (id: string | undefined, accounts: WhatsAppAccount[]): WhatsAppAccount | undefined => {
+  if (!id) return undefined;
+  const direct = accounts.find(a => a.id === id);
+  
+  // If it is a manual account (doesn't start with 'acc_'), let's check if there's a synced one
+  // with the same clean 11-digit phone number, and resolve to it as the source of truth!
+  if (direct && !id.startsWith('acc_') && direct.phoneNumber) {
+    const cleanManual = cleanPhone(direct.phoneNumber);
+    if (cleanManual) {
+      const synced = accounts.find(a => a.id.startsWith('acc_') && cleanPhone(a.phoneNumber) === cleanManual);
+      if (synced) return synced;
+    }
   }
-  if (cleaned.length === 12) {
-    return cleaned.startsWith('55');
-  }
-  return false;
+  return direct || accounts.find(a => a.id === id);
+};
+
+export const getWhatsAppTypeColor = (tipoWhatsapp?: string): string => {
+  if (!tipoWhatsapp) return "#25D366";
+  const lower = tipoWhatsapp.toLowerCase().trim();
+  if (lower.includes("business")) return "#25D366"; // Verde
+  if (lower.includes("pessoal") || lower.includes("pesssoal")) return "#eab308"; // Amarelo
+  if (lower.includes("dual")) return "#38bdf8"; // Azul claro
+  return "#25D366"; // Default
 };
 
 const findMatchingChip = (acc: WhatsAppAccount, chips: WhatsAppChip[]): WhatsAppChip | undefined => {
@@ -1068,16 +1086,14 @@ export default function App() {
 
   const activeWhatsappAccounts = useMemo(() => {
     const active = sortedWhatsappAccounts.filter(acc => {
-      if (acc.isActive === false) return false;
-      
-      // Se houver um chip correspondente sincronizado com a planilha Dominus
-      // e o status dele for 'caiu', inativa do sistema para não permitir atribuição
       const matchingChip = findMatchingChip(acc, whatsappChips);
       
-      if (matchingChip && (matchingChip.statusZap || '').trim().toLowerCase() === 'caiu') {
-        return false;
+      // If it is linked to a sheet chip, strictly require statusZap to be 'ativo' (Column K)
+      if (matchingChip) {
+        return (matchingChip.statusZap || '').trim().toLowerCase() === 'ativo';
       }
-      return true;
+      
+      return acc.isActive !== false;
     });
 
     // Deduplicate: If there are multiple active accounts with the same phone number or identifier/name,
@@ -1837,7 +1853,7 @@ export default function App() {
                 tipo,
                 localChip,
                 chipCadastrado,
-                numero,
+                numero: normalizedNumero,
                 normalizedNumero,
                 tipoWhatsapp,
                 aparelho,
@@ -1857,8 +1873,7 @@ export default function App() {
               const newAccId = `acc_${id}`;
               importedAccIds.add(newAccId);
 
-              const isChipCaiu = statusZap.toLowerCase() === 'caiu';
-              const isActive = !isChipCaiu;
+              const isActive = statusZap.toLowerCase().trim() === 'ativo';
               const deviceColor = getDeviceColor(aparelho, tipoWhatsapp);
 
               // Determine a highly descriptive, readable name for the synchronized account
@@ -1874,7 +1889,7 @@ export default function App() {
                 name: generatedName,
                 identifier: perfilPc || id,
                 color: deviceColor,
-                phoneNumber: numero,
+                phoneNumber: normalizedNumero,
                 origin: tipo || "Geral",
                 isActive: isActive
               };
@@ -2050,7 +2065,7 @@ export default function App() {
             currentTag === 'vendido' ? 'Vendido' :
             currentTag === 'lixo' ? 'Lixo' : ''
           );
-          const assignedAccName = updates.assignedWhatsappId ? whatsappAccounts.find(a => a.id === updates.assignedWhatsappId)?.name : (updates.assignedWhatsappId === "" ? "" : (whatsappAccounts.find(a => a.id === currentData.assignedWhatsappId)?.name || ""));
+          const assignedAccName = updates.assignedWhatsappId ? findWhatsAppAccount(updates.assignedWhatsappId, whatsappAccounts)?.name : (updates.assignedWhatsappId === "" ? "" : (findWhatsAppAccount(currentData.assignedWhatsappId, whatsappAccounts)?.name || ""));
 
           fetch(sheetSyncUrl, {
             method: 'POST',
@@ -2118,7 +2133,7 @@ export default function App() {
     if (!client) throw new Error("Cliente inválido ou não selecionado.");
     const clientKey = client.key || '';
     const extra = clientExtraData[clientKey] || {};
-    const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || client.assignedWhatsappId));
+    const assignedAcc = findWhatsAppAccount(extra.assignedWhatsappId || client.assignedWhatsappId, whatsappAccounts);
     const zapName = assignedAcc ? `${assignedAcc.name} (${assignedAcc.phoneNumber})` : 'Não Atribuído';
     
     const newFollowup = {
@@ -2347,7 +2362,7 @@ export default function App() {
         if (rowNumber) {
           const currentData = clientExtraData[clientKey] || {};
           const assignedWhatsappId = currentData.assignedWhatsappId || client?.assignedWhatsappId;
-          const assignedAcc = whatsappAccounts.find(a => a.id === assignedWhatsappId);
+          const assignedAcc = findWhatsAppAccount(assignedWhatsappId, whatsappAccounts);
           const assignedAccName = assignedAcc ? assignedAcc.name : '';
           
           const currentTagText = !resolvedNewTag ? '' : (
@@ -3528,7 +3543,7 @@ export default function App() {
       if (tag === 'lixo') return;
 
       const whatsappId = client.assignedWhatsappId;
-      const account = whatsappAccounts.find(a => a.id === whatsappId);
+      const account = findWhatsAppAccount(whatsappId, whatsappAccounts);
       const name = account ? account.name : 'Não Atribuído';
 
       // Distribution count
@@ -3793,7 +3808,7 @@ export default function App() {
       const tag = getClientTag(client);
       if (tag === 'lixo') return;
       const whatsappId = client.assignedWhatsappId;
-      const account = whatsappAccounts.find(a => a.id === whatsappId);
+      const account = findWhatsAppAccount(whatsappId, whatsappAccounts);
       const name = account ? account.name : 'Não Atribuído';
       distributionMap.set(name, (distributionMap.get(name) || 0) + 1);
     });
@@ -3815,7 +3830,7 @@ export default function App() {
       const tag = getClientTag(client);
       if (tag === 'lixo') return;
       const whatsappId = client.assignedWhatsappId;
-      const account = whatsappAccounts.find(a => a.id === whatsappId);
+      const account = findWhatsAppAccount(whatsappId, whatsappAccounts);
       const name = account ? account.name : 'Não Atribuído';
       const relevantSales = (client.manualSales || []).filter(sale => isWithinDashFilter(sale.timestamp || sale.date));
       const totalValue = relevantSales.reduce((acc, s) => acc + s.value, 0);
@@ -4259,7 +4274,7 @@ export default function App() {
                           const pStatus = paymentStatuses[clientKey];
                           const potCount = potsCounts[clientKey];
                           const now = new Date();
-                          const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
+                          const assignedAcc = findWhatsAppAccount(client.assignedWhatsappId, whatsappAccounts);
 
                           let reason = "";
                           let displayTime = "";
@@ -4453,7 +4468,7 @@ export default function App() {
                           <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-modern-border rounded-lg shadow-lg z-30 overflow-hidden divide-y divide-slate-100 max-h-[180px] overflow-y-auto custom-scrollbar">
                             {manualFilteredClients.map((client) => {
                               const extra = clientExtraData[client.key] || {};
-                              const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || client.assignedWhatsappId));
+                              const assignedAcc = findWhatsAppAccount(extra.assignedWhatsappId || client.assignedWhatsappId, whatsappAccounts);
                               return (
                                 <button
                                   key={client.key}
@@ -4507,7 +4522,7 @@ export default function App() {
                     {/* Selected Client Card Section */}
                     {selectedManualClient && (() => {
                       const extra = clientExtraData[selectedManualClient.key] || {};
-                      const assignedAcc = whatsappAccounts.find(a => a.id === (extra.assignedWhatsappId || selectedManualClient.assignedWhatsappId));
+                      const assignedAcc = findWhatsAppAccount(extra.assignedWhatsappId || selectedManualClient.assignedWhatsappId, whatsappAccounts);
                       return (
                         <div className="p-3 bg-slate-50 border border-modern-border rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
                           <div>
@@ -5210,7 +5225,7 @@ export default function App() {
                     const currentTag = getClientTag(client);
                     
                     const lastLead = getClientDisplayLead(client); // Match the active filters
-                    const assignedAcc = whatsappAccounts.find(a => a.id === client.assignedWhatsappId);
+                    const assignedAcc = findWhatsAppAccount(client.assignedWhatsappId, whatsappAccounts);
 
                     return (
                       <motion.tr 
@@ -5306,15 +5321,13 @@ export default function App() {
                               <button 
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
-                                  "rounded-md flex items-center justify-center transition-all border shadow-sm text-white font-extrabold text-[9px]",
+                                  "rounded flex items-center justify-center transition-all border shadow-sm text-white font-black text-[10px]",
                                   (client.assignedWhatsappId && assignedAcc)
-                                    ? "text-white" 
-                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500",
-                                  (client.assignedWhatsappId && assignedAcc && whatsappDisplayMode === 'telefone') ? "px-1.5 py-1 min-h-[24px] min-w-[40px]" : "w-6 h-6"
+                                    ? "text-white px-2 py-1 min-h-[24px]" 
+                                    : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500 w-6 h-6"
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? { 
-                                  backgroundColor: getDeviceColor(
-                                    findMatchingChip(assignedAcc, whatsappChips)?.aparelho || assignedAcc.color,
+                                  backgroundColor: getWhatsAppTypeColor(
                                     findMatchingChip(assignedAcc, whatsappChips)?.tipoWhatsapp
                                   )
                                 } : {}}
@@ -5322,9 +5335,11 @@ export default function App() {
                                 {(client.assignedWhatsappId && assignedAcc) ? (
                                   (() => {
                                     const matchingChip = findMatchingChip(assignedAcc, whatsappChips);
-                                    return whatsappDisplayMode === 'telefone' && matchingChip
-                                      ? (matchingChip.aparelho || "Sem Tel")
-                                      : assignedAcc.identifier;
+                                    if (whatsappDisplayMode === 'telefone') {
+                                      return (matchingChip?.aparelho || assignedAcc.name);
+                                    } else {
+                                      return (matchingChip?.perfilPc || assignedAcc.identifier);
+                                    }
                                   })()
                                 ) : (
                                   <Phone size={11} />
@@ -5366,10 +5381,18 @@ export default function App() {
                                     })
                                     .map(acc => {
                                       const matchingChip = findMatchingChip(acc, whatsappChips);
-
-                                      const badgeText = (whatsappDisplayMode === 'telefone' && matchingChip)
-                                        ? (matchingChip.aparelho || "Sem Tel")
-                                        : acc.identifier;
+                                      const tipoWhatsapp = matchingChip?.tipoWhatsapp || 'Pessoal';
+                                      const tipoWhatsappLower = tipoWhatsapp.toLowerCase().trim();
+                                      
+                                      const firstText = whatsappDisplayMode === 'telefone'
+                                        ? (matchingChip?.aparelho || acc.name)
+                                        : (matchingChip?.perfilPc || acc.identifier || acc.name);
+                                        
+                                      const phoneText = matchingChip?.numero || acc.phoneNumber || 'Sem número';
+                                      
+                                      const numBgColor = tipoWhatsappLower === 'business' ? '#25D366' :
+                                                         tipoWhatsappLower === 'pessoal' ? '#eab308' :
+                                                         tipoWhatsappLower === 'dual' ? '#38bdf8' : '#25D366';
 
                                       return (
                                         <button 
@@ -5379,48 +5402,32 @@ export default function App() {
                                             updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
                                           }}
                                           className={cn(
-                                            "w-full text-left px-3 py-2 text-[10px] font-bold hover:bg-slate-50 flex items-center gap-3 border-b border-modern-border/30 group/item transition-colors",
+                                            "w-full text-left px-4 py-3 text-[10px] font-bold hover:bg-slate-50 flex items-center justify-between border-b border-modern-border/30 transition-colors gap-3",
                                             client.assignedWhatsappId === acc.id && "bg-emerald-50/50"
                                           )}
                                         >
-                                          <div 
-                                            className={cn(
-                                              "flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow-sm rounded px-2 text-center truncate",
-                                              whatsappDisplayMode === 'telefone' ? "min-w-[80px] h-6" : "w-8 h-8"
-                                            )} 
-                                            style={{ 
-                                              backgroundColor: getDeviceColor(
-                                                matchingChip?.aparelho || acc.color,
-                                                matchingChip?.tipoWhatsapp
-                                              ) 
-                                            }}
-                                          >
-                                            {badgeText}
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            {/* 1º: Aparelho (Telefone) ou Perfil (PC) */}
+                                            <span className="font-bold text-modern-text text-[11px] truncate max-w-[140px]" title={firstText}>
+                                              {firstText}
+                                            </span>
+                                            
+                                            {/* 2º: Número com background correspondente */}
+                                            <span 
+                                              className="px-2 py-0.5 text-[10px] font-black text-white rounded font-mono shrink-0 select-all"
+                                              style={{ backgroundColor: numBgColor }}
+                                            >
+                                              {phoneText}
+                                            </span>
                                           </div>
-                                        <div className="flex flex-col min-w-0 flex-1">
-                                          <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                                            <span className="truncate text-modern-text leading-none font-bold text-[11px]">{acc.name}</span>
-                                            {matchingChip?.tipoWhatsapp && (
-                                              <span className={cn(
-                                                "px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider shrink-0 border",
-                                                matchingChip.tipoWhatsapp.toLowerCase() === 'business' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                                matchingChip.tipoWhatsapp.toLowerCase() === 'dual' ? "bg-sky-50 text-sky-700 border-sky-200" :
-                                                matchingChip.tipoWhatsapp.toLowerCase() === 'pessoal' ? "bg-amber-50 text-amber-700 border-amber-200" :
-                                                "bg-slate-50 text-slate-700 border-slate-200"
-                                              )}>
-                                                {matchingChip.tipoWhatsapp}
-                                              </span>
-                                            )}
-                                          </div>
-                                          <span className="text-[8px] uppercase text-modern-secondary tracking-widest leading-none opacity-85">
-                                            {whatsappDisplayMode === 'telefone' && matchingChip
-                                              ? `Nº: ${matchingChip.numero}`
-                                              : `Nº: ${acc.phoneNumber || 'Sem número'} • ${acc.origin}`}
+                                          
+                                          {/* 3º: Ao lado direito, tipo de whatsapp */}
+                                          <span className="text-[8px] font-black uppercase tracking-wider text-modern-secondary border border-modern-border/50 px-1.5 py-0.5 rounded bg-white shrink-0">
+                                            {tipoWhatsapp}
                                           </span>
-                                        </div>
-                                      </button>
-                                    );
-                                  })}
+                                        </button>
+                                      );
+                                    })}
                                   {activeWhatsappAccounts.length === 0 && (
                                     <div className="px-4 py-8 text-[10px] text-modern-secondary text-center italic font-bold bg-slate-50/50 uppercase tracking-widest">
                                       Nenhum Zap cadastrado.
