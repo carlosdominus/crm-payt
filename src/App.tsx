@@ -1041,6 +1041,10 @@ export default function App() {
       // Se houver um chip correspondente sincronizado com a planilha Dominus
       // e o status dele for 'caiu', inativa do sistema para não permitir atribuição
       const matchingChip = whatsappChips.find(c => {
+        if (acc.id.startsWith('acc_')) {
+          const chipId = acc.id.substring(4);
+          if (String(c.id) === chipId) return true;
+        }
         if (acc.phoneNumber) {
           const cleanAcc = cleanPhone(acc.phoneNumber);
           if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
@@ -5244,6 +5248,10 @@ export default function App() {
                                 style={(client.assignedWhatsappId && assignedAcc) ? { 
                                   backgroundColor: getDeviceColor(
                                     whatsappChips.find(c => {
+                                      if (assignedAcc.id.startsWith('acc_')) {
+                                        const chipId = assignedAcc.id.substring(4);
+                                        if (String(c.id) === chipId) return true;
+                                      }
                                       if (assignedAcc.phoneNumber) {
                                         const cleanAcc = cleanPhone(assignedAcc.phoneNumber);
                                         if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
@@ -5258,6 +5266,10 @@ export default function App() {
                                 {(client.assignedWhatsappId && assignedAcc) ? (
                                   (() => {
                                     const matchingChip = whatsappChips.find(c => {
+                                      if (assignedAcc.id.startsWith('acc_')) {
+                                        const chipId = assignedAcc.id.substring(4);
+                                        if (String(c.id) === chipId) return true;
+                                      }
                                       if (assignedAcc.phoneNumber) {
                                         const cleanAcc = cleanPhone(assignedAcc.phoneNumber);
                                         if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
@@ -5300,6 +5312,10 @@ export default function App() {
                                   )}
                                   {activeWhatsappAccounts.map(acc => {
                                     const matchingChip = whatsappChips.find(c => {
+                                      if (acc.id.startsWith('acc_')) {
+                                        const chipId = acc.id.substring(4);
+                                        if (String(c.id) === chipId) return true;
+                                      }
                                       if (acc.phoneNumber) {
                                         const cleanAcc = cleanPhone(acc.phoneNumber);
                                         if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
@@ -6585,6 +6601,10 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
                     {sortedWhatsappAccounts.map(acc => {
                       const matchingChip = whatsappChips.find(c => {
+                        if (acc.id.startsWith('acc_')) {
+                          const chipId = acc.id.substring(4);
+                          if (String(c.id) === chipId) return true;
+                        }
                         if (acc.phoneNumber) {
                           const cleanAcc = cleanPhone(acc.phoneNumber);
                           if (cleanAcc && c.normalizedNumero === cleanAcc) return true;
