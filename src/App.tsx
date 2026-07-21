@@ -5506,14 +5506,20 @@ export default function App() {
                                 className={cn(
                                   "rounded flex items-center justify-center transition-all border shadow-sm text-white font-black text-[10px]",
                                   (client.assignedWhatsappId && assignedAcc)
-                                    ? "text-white px-2 py-1 min-h-[24px]" 
+                                    ? "text-white px-2.5 py-1 min-h-[24px] whitespace-nowrap" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500 w-6 h-6"
                                 )}
-                                style={(client.assignedWhatsappId && assignedAcc) ? { 
-                                  backgroundColor: getWhatsAppTypeColor(
-                                    findMatchingChip(assignedAcc, whatsappChips)?.tipoWhatsapp
-                                  )
-                                } : {}}
+                                style={(client.assignedWhatsappId && assignedAcc) ? (() => {
+                                  const matchingChip = findMatchingChip(assignedAcc, whatsappChips);
+                                  const devName = cleanDeviceName(matchingChip?.aparelho || assignedAcc.name);
+                                  const tipoWhatsapp = matchingChip?.tipoWhatsapp || 'Pessoal';
+                                  return { 
+                                    backgroundColor: getDeviceStyleColor(devName),
+                                    borderBottom: `3px solid ${getWhatsAppTypeColor(tipoWhatsapp)}`,
+                                    borderBottomLeftRadius: '2px',
+                                    borderBottomRightRadius: '2px'
+                                  };
+                                })() : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
                                   (() => {
