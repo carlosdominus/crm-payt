@@ -1180,8 +1180,15 @@ export default function App() {
       }
 
       // If we have an identifier (like PC profile 1, 2...), check if we've seen it for the same type (origin)
-      // BUT do NOT deduplicate if it's '0' (which represents "Ainda Sem" PC profile placeholder)
-      if (ident && ident !== '0') {
+      // BUT do NOT deduplicate if it's '0' or any placeholder (like "Ainda Sem", "Não aplica", "Sem registro", etc.)
+      const isPlaceholderIdent = !ident || 
+                                 ident === '0' || 
+                                 ident.includes('sem') || 
+                                 ident.includes('aplica') || 
+                                 ident.includes('registro') || 
+                                 ident.includes('ainda');
+
+      if (ident && !isPlaceholderIdent) {
         const typeKey = `${acc.origin || ''}_${ident}`.toLowerCase().trim();
         if (seenIdentifiers.has(typeKey)) {
           continue; // skip duplicate
