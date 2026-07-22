@@ -286,7 +286,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-[11px]">
-              {filteredChips.map((chip) => {
+              {filteredChips.map((chip, idx) => {
                 const linkedClient = getLinkedClient(chip);
                 const isSelectedActive = activeChip?.id === chip.id;
                 
@@ -319,7 +319,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
 
                 return (
                   <tr 
-                    key={chip.id} 
+                    key={chip.id ? `${chip.id}_${idx}` : `chip_${idx}`} 
                     className={cn(
                       "hover:bg-slate-50 transition-colors",
                       isSelectedActive && "bg-modern-primary/5 hover:bg-modern-primary/5",
@@ -463,9 +463,9 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
                 </div>
 
                 <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                  {quickClientList.map(c => (
+                  {quickClientList.map((c, idx) => (
                     <button
-                      key={c.key}
+                      key={`${c.key}_${idx}`}
                       onClick={() => {
                         handleOpenChat(showClientSelectorForChip, c);
                         setShowClientSelectorForChip(null);

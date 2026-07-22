@@ -248,6 +248,29 @@ export const isValidPhone = (phone: string): boolean => {
   return VALID_DDDS.has(ddd);
 };
 
+export const formatPhone = (phone: string): string => {
+  if (!phone) return "";
+  const cleaned = cleanPhone(phone);
+  if (cleaned.length === 11) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 7)}-${cleaned.substring(7)}`;
+  }
+  if (cleaned.length === 10) {
+    return `(${cleaned.substring(0, 2)}) ${cleaned.substring(2, 6)}-${cleaned.substring(6)}`;
+  }
+  if (cleaned.length > 11) {
+    const last11 = cleaned.slice(-11);
+    return `(${last11.substring(0, 2)}) ${last11.substring(2, 7)}-${last11.substring(7)}`;
+  }
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11) {
+    return `(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}`;
+  }
+  return phone;
+};
+
 export const normalizeClientKey = (key: string): string => {
   if (!key) return "";
   if (key.startsWith("tel_")) {
@@ -4578,7 +4601,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {followupClients.map(client => {
+                        {followupClients.map((client, idx) => {
                           const clientKey = client.key;
                           const currentTag = clientTags[clientKey];
                           const tagDateStr = tagTimestamps[clientKey];
@@ -4608,7 +4631,7 @@ export default function App() {
                           }
 
                           return (
-                            <tr key={client.key} className="hover:bg-slate-50 transition-all cursor-pointer text-xs" onClick={() => { setSelectedClient(client); setView('crm'); }}>
+                            <tr key={`${client.key}_${idx}`} className="hover:bg-slate-50 transition-all cursor-pointer text-xs" onClick={() => { setSelectedClient(client); setView('crm'); }}>
                               
                               {/* 1. Column: Action/Tag selection buttons identical to main table */}
                               <td className="px-3 py-1 border-b border-r border-[#dadce0]" onClick={e => e.stopPropagation()}>
@@ -4777,12 +4800,12 @@ export default function App() {
                         {/* Search Results Dropdown */}
                         {manualFilteredClients.length > 0 && !selectedManualClient && (
                           <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-modern-border rounded-lg shadow-lg z-30 overflow-hidden divide-y divide-slate-100 max-h-[180px] overflow-y-auto custom-scrollbar">
-                            {manualFilteredClients.map((client) => {
+                            {manualFilteredClients.map((client, idx) => {
                               const extra = clientExtraData[client.key] || {};
                               const assignedAcc = findWhatsAppAccount(extra.assignedWhatsappId || client.assignedWhatsappId, whatsappAccounts);
                               return (
                                 <button
-                                  key={client.key}
+                                  key={`${client.key}_${idx}`}
                                   type="button"
                                   onClick={() => {
                                     setSelectedManualClient(client);
@@ -4899,11 +4922,11 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {manualFollowups.map((f) => {
+                          {manualFollowups.map((f, idx) => {
                             const todayStr = format(new Date(), 'yyyy-MM-dd');
                             const isTodayOrPast = f.date <= todayStr;
                             return (
-                              <tr key={f.id} className="hover:bg-slate-50 transition-all text-xs">
+                              <tr key={f.id ? `${f.id}_${idx}` : `f_${idx}`} className="hover:bg-slate-50 transition-all text-xs">
                                 <td className="px-3 py-2 border-b border-r border-[#dadce0]">
                                   <div>
                                     <p className="font-bold text-modern-text">{f.nome}</p>
@@ -5540,7 +5563,7 @@ export default function App() {
 
                     return (
                       <motion.tr 
-                        key={clientKey}
+                        key={`${clientKey}_${idx}`}
                         onClick={() => setSelectedClient(client)}
                         className="group transition-colors cursor-pointer hover:bg-[#f1f3f4] relative hover:z-[200]"
                         initial={false}
@@ -5854,7 +5877,7 @@ export default function App() {
                         <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center justify-between group/phone">
                             <p className="text-xs font-normal text-[#3c4043] flex items-center gap-1.5">
-                              <Phone size={11} className="text-[#5f6368]" /> {client.telefone || <span className="text-rose-400 italic text-[9px]">Sem número</span>}
+                              <Phone size={11} className="text-[#5f6368]" /> {client.telefone ? formatPhone(client.telefone) : <span className="text-rose-400 italic text-[9px]">Sem número</span>}
                               {client.telefone && (
                                 <button
                                   onClick={(e) => {
@@ -6103,7 +6126,7 @@ export default function App() {
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-2 mb-3">
+                      <div className="flex items-center gap-2 mb-1">
                         <h2 className="text-3xl font-black tracking-tight text-modern-text leading-tight">{currentSelectedClient.nome}</h2>
                         <button
                           onClick={() => {
@@ -6118,9 +6141,30 @@ export default function App() {
                           <Edit size={16} />
                         </button>
                       </div>
-                      <div className="flex flex-wrap gap-3 text-xs font-bold text-modern-secondary mb-6">
-                        <p className="flex items-center gap-2 bg-slate-50/50 px-3 py-1.5 rounded-xl border border-modern-border/60"><AtSign size={14} /> {currentSelectedClient.email}</p>
-                        <p className="flex items-center gap-2 bg-slate-50/50 px-3 py-1.5 rounded-xl border border-modern-border/60"><Phone size={14} /> {currentSelectedClient.telefone}</p>
+
+                      {/* Large Prominent Phone Number below Name */}
+                      {currentSelectedClient.telefone && (
+                        <div className="flex items-center gap-2.5 my-2">
+                          <div className="inline-flex items-center gap-2.5 text-2xl sm:text-3xl font-black text-emerald-600 tracking-tight bg-emerald-50/90 px-3.5 py-1.5 rounded-2xl border border-emerald-200">
+                            <Phone className="shrink-0 text-emerald-600 fill-emerald-100" size={24} />
+                            <span>{formatPhone(currentSelectedClient.telefone)}</span>
+                            <button
+                              onClick={() => copyToClipboard(currentSelectedClient.telefone)}
+                              className="p-1.5 text-xs text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-all ml-1 flex items-center gap-1"
+                              title="Copiar Telefone"
+                            >
+                              <Copy size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-3 text-xs font-bold text-modern-secondary mb-6 mt-2">
+                        {currentSelectedClient.email && (
+                          <p className="flex items-center gap-2 bg-slate-50/50 px-3 py-1.5 rounded-xl border border-modern-border/60">
+                            <AtSign size={14} /> {currentSelectedClient.email}
+                          </p>
+                        )}
                       </div>
                     </>
                   )}
@@ -6217,8 +6261,8 @@ export default function App() {
                     {currentSelectedClient.manualSales && currentSelectedClient.manualSales.length > 0 ? (
                       [...currentSelectedClient.manualSales]
                         .sort((a, b) => b.timestamp - a.timestamp)
-                        .map(sale => (
-                          <div key={sale.id} className="bg-slate-50 border border-modern-border p-5 flex items-center justify-between group/sale rounded-xl">
+                        .map((sale, idx) => (
+                          <div key={sale.id ? `${sale.id}_${idx}` : `sale_${idx}`} className="bg-slate-50 border border-modern-border p-5 flex items-center justify-between group/sale rounded-xl">
                             <div>
                               <p className="text-sm font-bold text-modern-text">{sale.productName}</p>
                               <p className="text-[10px] font-bold text-modern-secondary uppercase tracking-wider">
@@ -6270,8 +6314,8 @@ export default function App() {
                     {interactionLogs[currentSelectedClient.key] && (
                       <div className="space-y-4">
                         <p className="text-[10px] font-black uppercase text-modern-secondary tracking-widest border-b border-modern-border pb-2">Histórico de Interações</p>
-                        {interactionLogs[currentSelectedClient.key].map(log => (
-                          <div key={log.id} className="flex gap-4 items-start bg-emerald-50/30 p-4 border border-emerald-100 rounded-xl">
+                        {interactionLogs[currentSelectedClient.key].map((log, idx) => (
+                          <div key={log.id ? `${log.id}_${idx}` : `log_${idx}`} className="flex gap-4 items-start bg-emerald-50/30 p-4 border border-emerald-100 rounded-xl">
                              <div className="w-6 h-6 bg-emerald-600 flex items-center justify-center shrink-0 rounded-md">
                                 {log.type === 'tag_change' ? <AlertCircle size={12} className="text-white" /> : <Database size={12} className="text-white" />}
                              </div>
@@ -6293,12 +6337,12 @@ export default function App() {
                   </div>
 
                   <div className="space-y-8">
-                    {currentSelectedClient.leads.map((lead) => {
+                    {currentSelectedClient.leads.map((lead, idx) => {
                       const rawId = lead.id || lead.codPay || '';
                       const saleId = `payt_${rawId}`.replace(/[^a-zA-Z0-9_\-]/g, '_');
                       const isLeadAlreadySold = manualSales.some(s => s.id === saleId);
                       return (
-                        <div key={lead.id} className="modern-card p-8 border-none shadow-sm bg-slate-50/50 rounded-2xl">
+                        <div key={lead.id ? `${lead.id}_${idx}` : `lead_${idx}`} className="modern-card p-8 border-none shadow-sm bg-slate-50/50 rounded-2xl">
                           <div className="flex justify-between items-start mb-6">
                             <div>
                               <p className="text-[10px] font-extrabold text-modern-secondary mb-2 flex items-center gap-2">

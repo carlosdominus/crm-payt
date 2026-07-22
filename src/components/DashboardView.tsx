@@ -1652,11 +1652,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </thead>
                   <tbody>
                     {displayedSalesForTable.length > 0 ? (
-                      displayedSalesForTable.sort((a,b) => b.timestamp - a.timestamp).map(sale => {
+                      displayedSalesForTable.sort((a,b) => b.timestamp - a.timestamp).map((sale, idx) => {
                         const client = findClientForSale(sale, enrichedClients);
                         const lastLead = client?.leads[0];
                         return (
-                          <tr key={sale.id} className="hover:bg-slate-50/50 transition-colors group">
+                          <tr key={sale.id ? `${sale.id}_${idx}` : `sale_${idx}`} className="hover:bg-slate-50/50 transition-colors group">
                             <td className="py-3 px-4 text-xs font-bold text-modern-text border-b border-slate-100/65 font-mono">
                               {(() => {
                                 const [year, month, day] = sale.date.split('-');
@@ -1903,11 +1903,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="p-5 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
                 {selectedGenderClients.length > 0 ? (
                   <div className="space-y-2">
-                    {selectedGenderClients.map(client => {
+                    {selectedGenderClients.map((client, idx) => {
                       const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
                       const clientSales = (client.manualSales || []).filter(s => isWithinDashFilter(s.timestamp || s.date));
                       return (
-                        <div key={client.key} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
+                        <div key={`${client.key}_${idx}`} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div>
                               <h4 className="text-xs font-bold text-modern-text">{client.nome || 'Cliente sem nome'}</h4>
@@ -1929,8 +1929,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           {clientSales.length > 0 && (
                             <div className="pt-2 border-t border-slate-200/60 text-[11px] space-y-1">
                               <p className="text-[10px] font-black uppercase text-modern-secondary tracking-wider">Histórico de Vendas no Período:</p>
-                              {clientSales.map(sale => (
-                                <div key={sale.id} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
+                              {clientSales.map((sale, idx) => (
+                                <div key={sale.id ? `${sale.id}_${idx}` : `sale_${idx}`} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
                                   <span className="font-bold text-slate-700">{sale.productName}</span>
                                   <div className="flex items-center gap-3">
                                     <span className="text-slate-400">{sale.date}</span>
@@ -1996,11 +1996,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="p-5 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
                 {selectedStateClients.length > 0 ? (
                   <div className="space-y-2">
-                    {selectedStateClients.map(client => {
+                    {selectedStateClients.map((client, idx) => {
                       const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
                       const clientSales = (client.manualSales || []).filter(s => isWithinDashFilter(s.timestamp || s.date));
                       return (
-                        <div key={client.key} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
+                        <div key={`${client.key}_${idx}`} className="bg-slate-50 border border-slate-100 p-4 rounded-xl space-y-2 hover:border-slate-300 transition-all">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div>
                               <h4 className="text-xs font-bold text-modern-text">{client.nome || 'Cliente sem nome'}</h4>
@@ -2022,8 +2022,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           {clientSales.length > 0 && (
                             <div className="pt-2 border-t border-slate-200/60 text-[11px] space-y-1">
                               <p className="text-[10px] font-black uppercase text-modern-secondary tracking-wider">Histórico de Vendas no Período:</p>
-                              {clientSales.map(sale => (
-                                <div key={sale.id} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
+                              {clientSales.map((sale, idx) => (
+                                <div key={sale.id ? `${sale.id}_${idx}` : `sale_${idx}`} className="flex justify-between items-center bg-white px-3 py-1.5 rounded border border-slate-100 font-mono text-[11px]">
                                   <span className="font-bold text-slate-700">{sale.productName}</span>
                                   <div className="flex items-center gap-3">
                                     <span className="text-slate-400">{sale.date}</span>
