@@ -808,19 +808,15 @@ const isObsoleteLead = (lead: Lead, allLeads: Lead[]): boolean => {
   
   const normLeadProd = normalizeProductName(lead.produto || "");
   
-  // An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product
-  // that was created at the same time or later (or within 2 hours before, to handle slight clock issues).
+  // An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product or customer
   const hasApprovedSameProduct = allLeads.some(l => {
     if (l.status !== 'Aprovado') return false;
     
     const normLProd = normalizeProductName(l.produto || "");
-    const sameProduct = normLeadProd === normLProd || 
+    const sameProduct = !normLeadProd || !normLProd || normLeadProd === normLProd || 
                         (normLeadProd && normLProd && (normLeadProd.includes(normLProd) || normLProd.includes(normLeadProd)));
                         
-    if (!sameProduct) return false;
-    
-    // Check if approved lead is newer or close in time (within 2 hours before, or anytime after)
-    return l.timestamp >= lead.timestamp - 7200000;
+    return sameProduct;
   });
   
   return hasApprovedSameProduct;
@@ -986,6 +982,11 @@ const predictGenderFromName = (fullName: string | undefined | null): 'Masculino'
 const determineActiveStatus = (leads: Lead[]): string => {
   if (!leads || leads.length === 0) return 'Sem status';
   
+  // If ANY lead for this client is 'Aprovado', active status MUST be 'Aprovado'
+  if (leads.some(l => l.status === 'Aprovado')) {
+    return 'Aprovado';
+  }
+  
   // Filter out obsolete leads before determining status!
   const activeLeads = leads.filter(lead => !isObsoleteLead(lead, leads));
   const targetLeads = activeLeads.length > 0 ? activeLeads : leads;
@@ -1001,9 +1002,7 @@ const determineActiveStatus = (leads: Lead[]): string => {
   
   if (sorted.length === 1) return mostRecent.status;
   
-  // Find leads belonging to the SAME checkout session as the most recent checkout:
-  // - Same non-empty codPay, OR
-  // - Same product name (fuzzy match) AND timeframe <= 2 hours (7200000 ms)
+  // Find leads belonging to the SAME checkout session as the most recent checkout
   const normMostRecentProd = normalizeProductName(mostRecent.produto || "");
   const sessionLeads = sorted.filter(l => {
     if (mostRecent.codPay && l.codPay && mostRecent.codPay === l.codPay) {
@@ -2984,51 +2983,109 @@ export default function App() {
             }
             
             const leadValue = parseFloat(cleanValor);
-            const rawStatus = (row['status'] || 'Pendente').trim().toLowerCase();
+            const rawStatus = (row['status'] || row['situacao'] || row['situação'] || row['estado'] || row['state'] || 'Pendente').toString().trim().toLowerCase();
             let normalizedStatus = 'Pendente';
             
-            let telefoneRaw = (row['telefone'] || row['whatsapp'] || row['celular'] || row['phone'] || '').toString().trim();
-            let emailRaw = (row['email'] || row['e-mail'] || row['mail'] || '').toString().trim();
+            let telefoneRaw = (
+              row['telefone'] || row['whatsapp'] || row['celular'] || row['phone'] || 
+              row['tel'] || row['fone'] || row['contato'] || row['telefone_cliente'] || 
+              row['celular_cliente'] || row['cliente_telefone'] || row['whatsapp_cliente'] || ''
+            ).toString().trim();
+
+            let emailRaw = (
+              row['email'] || row['e-mail'] || row['mail'] || row['email_cliente'] || 
+              row['cliente_email'] || ''
+            ).toString().trim();
 
             const cleanedTelefone = cleanPhone(telefoneRaw);
             const productFromE = eHeader ? (row[eHeader] || '').toString().trim() : '';
 
-            if (rawStatus.startsWith('approved') || rawStatus === 'aprovado' || rawStatus === 'paid' || rawStatus === 'pago' || rawStatus === 'succeeded' || rawStatus === 'success' || rawStatus === 'concluido' || rawStatus === 'completo') {
+            if (
+              rawStatus.includes('aprovad') || 
+              rawStatus.includes('approved') || 
+              rawStatus.includes('paid') || 
+              rawStatus.includes('pago') || 
+              rawStatus.includes('paga') || 
+              rawStatus.includes('succeeded') || 
+              rawStatus.includes('success') || 
+              rawStatus.includes('concluid') || 
+              rawStatus.includes('complet') || 
+              rawStatus.includes('convertid') || 
+              rawStatus.includes('autorizad')
+            ) {
               normalizedStatus = 'Aprovado';
-            } else if (rawStatus.startsWith('pending') || rawStatus === 'pendente' || rawStatus === 'aguardando' || rawStatus === 'aguardando pagamento' || rawStatus === 'waiting_payment') {
-              normalizedStatus = 'Pendente';
-            } else if (rawStatus === 'refused' || rawStatus === 'cartao recusado' || rawStatus === 'cartão recusado' || rawStatus === 'rejected' || rawStatus === 'cancelado' || rawStatus === 'recusado') {
-              normalizedStatus = 'Recusado';
-            } else if (rawStatus === 'reembolsado' || rawStatus === 'devolvido') {
+            } else if (
+              rawStatus.includes('reembolsad') || 
+              rawStatus.includes('devolvid') || 
+              rawStatus.includes('refund')
+            ) {
               normalizedStatus = 'Reembolsado';
-            } else if (rawStatus === 'abandonado' || rawStatus === 'carrinho abandonado' || rawStatus === 'lost_cart') {
-              normalizedStatus = 'Carrinho Abandonado';
-            } else if (rawStatus.startsWith('expired') || rawStatus === 'expirado') {
+            } else if (
+              rawStatus.includes('refus') || 
+              rawStatus.includes('recusad') || 
+              rawStatus.includes('cancelad') || 
+              rawStatus.includes('reject')
+            ) {
+              normalizedStatus = 'Recusado';
+            } else if (
+              rawStatus.includes('expirad') || 
+              rawStatus.includes('expire')
+            ) {
               normalizedStatus = 'Expirado';
+            } else if (
+              rawStatus.includes('abandonad') || 
+              rawStatus.includes('lost_cart')
+            ) {
+              normalizedStatus = 'Carrinho Abandonado';
+            } else if (
+              rawStatus.includes('pending') || 
+              rawStatus.includes('pendente') || 
+              rawStatus.includes('aguardando') || 
+              rawStatus.includes('waiting') || 
+              rawStatus.includes('gerado')
+            ) {
+              normalizedStatus = 'Pendente';
             } else if (rawStatus === 'lixo') {
               normalizedStatus = 'Lixo';
             }
 
-            const paymentMethodStr = row['tipo de pagamento'] || '';
+            const paymentMethodStr = (
+              row['tipo de pagamento'] || row['forma de pagamento'] || row['meio de pagamento'] || 
+              row['pagamento'] || row['metodo_pagamento'] || row['metodo'] || row['método'] || ''
+            ).toString().trim();
+
             const checkoutUrlFromV = vHeader ? (row[vHeader] || '').toString().trim() : '';
 
             const rowEmail = emailRaw.toLowerCase().trim();
             const rowPhone = cleanedTelefone;
-            const rowCodPay = (row['cod pay'] || '').toString().trim();
-            const rowProd = productFromE || (row['produto'] || '').trim();
+            const rowCodPay = (
+              row['cod pay'] || row['cod_pay'] || row['codpay'] || row['codigo'] || 
+              row['código'] || row['code'] || row['transacao'] || row['transação'] || 
+              row['id_transacao'] || row['identificador'] || row['id'] || ''
+            ).toString().trim();
+
+            const rowProd = productFromE || (
+              row['produto'] || row['product'] || row['nome_produto'] || row['item'] || ''
+            ).toString().trim();
+
+            const nameRaw = (
+              row['nome'] || row['cliente'] || row['nome_cliente'] || row['cliente_nome'] || 
+              row['name'] || row['customer'] || 'Sem Nome'
+            ).toString().trim();
+
             const rowVal = isNaN(leadValue) ? '0' : leadValue.toString();
             const fallbackId = `row_${index + 2}_${dateStr}_${timeStr}_${rowPhone}_${rowEmail}_${rowCodPay}_${rowVal}_${rowProd}`;
-            const finalId = row['id'] ? row['id'].toString().trim() : fallbackId;
+            const finalId = (row['id'] || rowCodPay) ? (row['id'] || rowCodPay).toString().trim() : fallbackId;
 
             return {
               id: finalId,
-              nome: (row['nome'] || 'Sem Nome').trim(),
+              nome: nameRaw,
               telefone: cleanedTelefone,
               email: emailRaw,
-              produto: productFromE || (row['produto'] || '').trim(),
+              produto: rowProd,
               valor: isNaN(leadValue) ? 'R$ 0,00' : `R$ ${leadValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
               status: normalizedStatus,
-              codPay: (row['cod pay'] || '').trim(),
+              codPay: rowCodPay,
               checkoutUrl: checkoutUrlFromV || (row['checkout_link'] || row['checkout'] || '').trim(),
               data: dateStr,
               hora: timeStr,
@@ -3297,6 +3354,9 @@ export default function App() {
       const totalSpent = client.totalSpent + manualSpent;
       
       let status = client.status;
+      if (client.leads.some(l => l.status === 'Aprovado') || clientManualSales.length > 0) {
+        status = 'Aprovado';
+      }
       const extra = clientExtraData[client.key] || {};
       const nome = extra.nome || client.nome;
       const email = extra.email || client.email;
