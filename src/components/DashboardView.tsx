@@ -9,6 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { WhatsAppChip } from '../types';
+import { findClientForSale, cleanPhone } from '../App';
 
 const cn = (...classes: (string | boolean | undefined)[]) => classes.filter(Boolean).join(' ');
 
@@ -433,7 +434,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const salesCountMap = new Map<string, number>();
     
     filteredSalesForDash.forEach(sale => {
-      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      const client = findClientForSale(sale, enrichedClients);
       const whatsappId = client?.assignedWhatsappId;
       const key = whatsappId || 'Não Atribuído';
       
@@ -441,17 +442,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       salesCountMap.set(key, (salesCountMap.get(key) || 0) + 1);
     });
     
-    const salesData = whatsappAccounts.map(acc => {
-      const formattedName = getFormattedAccountName(acc);
-      return {
-        name: formattedName,
-        value: salesValueMap.get(acc.id) || 0,
-        count: salesCountMap.get(acc.id) || 0,
-        color: acc.color
-      };
-    }).sort((a, b) => b.value - a.value);
+    const salesData = whatsappAccounts
+      .map(acc => {
+        const formattedName = getFormattedAccountName(acc);
+        return {
+          name: formattedName,
+          value: salesValueMap.get(acc.id) || 0,
+          count: salesCountMap.get(acc.id) || 0,
+          color: acc.color
+        };
+      })
+      .filter(item => item.value > 0);
 
-    if (salesValueMap.has('Não Atribuído')) {
+    if (salesValueMap.has('Não Atribuído') && (salesValueMap.get('Não Atribuído') || 0) > 0) {
       salesData.push({
         name: 'Não Atribuído',
         value: salesValueMap.get('Não Atribuído') || 0,
@@ -459,7 +462,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         color: '#cbd5e1'
       });
     }
-    return salesData;
+    return salesData.sort((a, b) => b.value - a.value);
   }, [filteredSalesForDash, enrichedClients, whatsappAccounts, whatsappChips, whatsappDisplayMode]);
 
   const dashManualSalesByProduct = useMemo(() => {
@@ -657,14 +660,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       '98': 'Maranhão (MA)', '99': 'Maranhão (MA)'
     };
     const getBrazilLocalFromPhone = (phone: string): string => {
-      if (!phone) return 'Não Especificado';
-      const cleaned = phone.replace(/\D/g, '');
-      let withoutDDI = cleaned;
-      if (cleaned.startsWith('55') && cleaned.length >= 10) {
-        withoutDDI = cleaned.substring(2);
-      }
-      if (withoutDDI.length >= 2) {
-        const ddd = withoutDDI.substring(0, 2);
+      if (!phone) return 'Sem DDD';
+      const cleaned = cleanPhone(phone);
+      if (cleaned.length >= 2) {
+        const ddd = cleaned.substring(0, 2);
         return dddStateMap[ddd] || `Outros (DDD ${ddd})`;
       }
       return 'Sem DDD';
@@ -673,10 +672,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const localMap = new Map<string, number>();
     // Use filteredSalesForDash (representing manual sales) to get DDD from matching clients
     filteredSalesForDash.forEach(sale => {
-      const client = enrichedClients.find(c => c.key === sale.clientKey);
-      if (client) {
+      const client = findClientForSale(sale, enrichedClients);
+      if (client && client.telefone) {
         const loc = getBrazilLocalFromPhone(client.telefone);
-        localMap.set(loc, (localMap.get(loc) || 0) + 1);
+        if (loc) {
+          localMap.set(loc, (localMap.get(loc) || 0) + 1);
+        }
       }
     });
     
@@ -1381,11 +1382,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="h-[220px] w-full">
                     {dashWhatsappSales.some(s => s.value > 0) ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={dashWhatsappSales} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <BarChart data={dashWhatsappSales} layout="vertical" margin={{ left: 10, right: 10, top: 10, bottom: 10 }}>
                           <XAxis type="number" tick={{ fontSize: 9 }} tickLine={false} />
-                          <YAxis dataKey="name" type="category" tick={{ fontSize: 9 }} width={100} tickLine={false} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 8 }} width={120} interval={0} tickLine={false} />
                           <Tooltip formatter={(value: any) => [new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value), 'Faturamento']} />
-                          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                          <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
                             {dashWhatsappSales.map((entry: any, index: number) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
@@ -1502,11 +1503,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="h-[225px] w-full">
                     {dashLocationDistribution.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={dashLocationDistribution}>
-                          <XAxis dataKey="name" tick={{ fontSize: 8 }} interval={0} tickLine={false} />
+                        <BarChart data={dashLocationDistribution} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+                          <XAxis dataKey="name" tick={{ fontSize: 8 }} interval={0} angle={-15} textAnchor="end" tickLine={false} />
                           <YAxis tick={{ fontSize: 9 }} tickLine={false} />
                           <Tooltip formatter={(value: any) => [value, 'Vendas']} />
-                          <Bar dataKey="value" fill="#ec4899" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="value" fill="#ec4899" radius={[4, 4, 0, 0]} barSize={28} />
                         </BarChart>
                       </ResponsiveContainer>
                     ) : (
@@ -1599,7 +1600,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <tbody>
                     {displayedSalesForTable.length > 0 ? (
                       displayedSalesForTable.sort((a,b) => b.timestamp - a.timestamp).map(sale => {
-                        const client = enrichedClients.find(c => c.key === sale.clientKey);
+                        const client = findClientForSale(sale, enrichedClients);
                         const lastLead = client?.leads[0];
                         return (
                           <tr key={sale.id} className="hover:bg-slate-50/50 transition-colors group">

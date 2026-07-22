@@ -196,33 +196,99 @@ const PAYMENT_METHODS: Record<string, string> = {
   "7": "Pix"
 };
 
-const cleanPhone = (phone: string): string => {
+const VALID_DDDS = new Set([
+  '11','12','13','14','15','16','17','18','19',
+  '21','22','24','27','28',
+  '31','32','33','34','35','37','38',
+  '41','42','43','44','45','46','47','48','49',
+  '51','53','54','55',
+  '61','62','63','64','65','66','67','68','69',
+  '71','73','74','75','77','79',
+  '81','82','83','84','85','86','87','88','89',
+  '91','92','93','94','95','96','97','98','99'
+]);
+
+export const cleanPhone = (phone: string): string => {
   if (!phone) return "";
-  // Remove all non-digits
   let cleaned = phone.replace(/\D/g, '');
-  
+  if (!cleaned) return "";
+
   // Handle double DDI (5555...)
   if (cleaned.startsWith('5555') && cleaned.length >= 14) {
     cleaned = cleaned.substring(2);
   }
-  
-  // If it starts with 55 (DDI) and is 12 or 13 digits, strip the 55 prefix to get DDD + number
-  if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
-    cleaned = cleaned.substring(2);
+
+  // If starts with '55' and total length >= 11, strip '55' if removing it leaves a valid DDD
+  if (cleaned.startsWith('55') && cleaned.length >= 11) {
+    const candidateDDD = cleaned.substring(2, 4);
+    if (VALID_DDDS.has(candidateDDD)) {
+      cleaned = cleaned.substring(2);
+    }
   }
-  
-  // If it's 10 digits (DDD + 8 digits), insert '9' after the first 2 digits (DDD) to convert to 11 digits
+
+  // If 10 digits (DDD + 8 digits), check if mobile (6,7,8,9) and prefix '9' after DDD
   if (cleaned.length === 10) {
-    cleaned = cleaned.substring(0, 2) + '9' + cleaned.substring(2);
+    const ddd = cleaned.substring(0, 2);
+    if (VALID_DDDS.has(ddd)) {
+      const firstDigit = cleaned.charAt(2);
+      if (['6','7','8','9'].includes(firstDigit)) {
+        cleaned = ddd + '9' + cleaned.substring(2);
+      }
+    }
   }
-  
+
   return cleaned;
 };
 
-const isValidPhone = (phone: string): boolean => {
+export const isValidPhone = (phone: string): boolean => {
+  if (!phone) return false;
   const cleaned = cleanPhone(phone);
-  // An 11-digit Brazilian mobile number (DDD + 9XXXXXXXX)
-  return cleaned.length === 11;
+  if (cleaned.length !== 11 && cleaned.length !== 10) return false;
+  const ddd = cleaned.substring(0, 2);
+  return VALID_DDDS.has(ddd);
+};
+
+export const normalizeClientKey = (key: string): string => {
+  if (!key) return "";
+  if (key.startsWith("tel_")) {
+    const rawDigits = key.replace("tel_", "");
+    const cleaned = cleanPhone(rawDigits);
+    return `tel_${cleaned}`;
+  }
+  return key.toLowerCase().trim();
+};
+
+export const findClientForSale = (sale: any, clients: any[]): any | undefined => {
+  if (!sale || !clients || clients.length === 0) return undefined;
+  const normSaleKey = normalizeClientKey(sale.clientKey || '');
+
+  // 1. Direct match by key or normalized key
+  let client = clients.find(c => c.key === sale.clientKey || (c.key && normalizeClientKey(c.key) === normSaleKey));
+  if (client) return client;
+
+  // 2. Fallback: match by clean phone
+  const saleDigits = (sale.clientKey || '').replace(/\D/g, '');
+  if (saleDigits.length >= 8) {
+    const cleanSalePhone = cleanPhone(saleDigits);
+    if (cleanSalePhone) {
+      client = clients.find(c => c.telefone && cleanPhone(c.telefone) === cleanSalePhone);
+      if (client) return client;
+
+      client = clients.find(c => c.leads?.some((l: any) => l.telefone && cleanPhone(l.telefone) === cleanSalePhone));
+      if (client) return client;
+    }
+  }
+
+  // 3. Fallback: match by email
+  if (sale.clientKey && sale.clientKey.startsWith('email_')) {
+    const saleEmail = sale.clientKey.replace('email_', '').toLowerCase().trim();
+    if (saleEmail) {
+      client = clients.find(c => c.email && c.email.toLowerCase().trim() === saleEmail);
+      if (client) return client;
+    }
+  }
+
+  return undefined;
 };
 
 export const findWhatsAppAccount = (id: string | undefined, accounts: WhatsAppAccount[]): WhatsAppAccount | undefined => {
@@ -3214,12 +3280,14 @@ export default function App() {
   }, [sheetCsvUrl]);
 
   const enrichedClients = useMemo(() => {
-    // Map manual sales to client keys for faster lookup
+    // Map manual sales to client keys using robust findClientForSale
     const salesByClient = new Map<string, ManualSale[]>();
     manualSales.forEach(sale => {
-      const list = salesByClient.get(sale.clientKey) || [];
+      const matchedClient = findClientForSale(sale, clients);
+      const keyToUse = matchedClient ? matchedClient.key : sale.clientKey;
+      const list = salesByClient.get(keyToUse) || [];
       list.push(sale);
-      salesByClient.set(sale.clientKey, list);
+      salesByClient.set(keyToUse, list);
     });
 
     return clients.map(client => {
@@ -3264,7 +3332,6 @@ export default function App() {
       end = endOfDay(parse(customEndDate, 'yyyy-MM-dd', new Date()));
     }
 
-    const manualSalesKeys = new Set(manualSales.map(s => s.clientKey));
     const startMs = start ? start.getTime() : 0;
     const endMs = end ? end.getTime() : 0;
 
@@ -3272,7 +3339,7 @@ export default function App() {
       const clientKey = client.key;
       const tag = getClientTag(client);
 
-      if (showOnlyManualSales && !manualSalesKeys.has(clientKey)) return false;
+      if (showOnlyManualSales && (!client.manualSales || client.manualSales.length === 0)) return false;
 
       const matchesSearch = 
         client.nome.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
@@ -5385,7 +5452,7 @@ export default function App() {
                   <tr className="bg-[#f8f9fa]">
                     <th className="sticky top-0 z-20 px-2 py-1 text-[11px] font-medium text-[#5f6368] text-center border-b border-r border-[#dadce0] bg-[#f8f9fa] w-16">Linha</th>
                     <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center">Ações</th>
-                    <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-12">Zap</th>
+                    <th className="sticky top-0 z-20 px-2 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa] text-center w-[130px] min-w-[130px] max-w-[130px]">Zap</th>
                     <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">Cliente</th>
                     <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">WhatsApp / Telefone</th>
                     <th className="sticky top-0 z-20 px-3 py-1 text-[11px] font-medium text-[#5f6368] uppercase tracking-wider border-b border-r border-[#dadce0] bg-[#f8f9fa]">E-mail</th>
@@ -5498,15 +5565,15 @@ export default function App() {
                             </button>
                           </div>
                         </td>
-                        <td className="px-3 py-1 border-b border-r border-[#dadce0] overflow-visible">
-                          <div className="flex items-center justify-center">
-                            <div className="relative group/zap" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-2 py-1 border-b border-r border-[#dadce0] overflow-hidden w-[130px] min-w-[130px] max-w-[130px] text-center">
+                          <div className="flex items-center justify-center w-full">
+                            <div className="relative group/zap max-w-[120px]" onClick={(e) => e.stopPropagation()}>
                               <button 
                                 onClick={(e) => e.stopPropagation()}
                                 className={cn(
                                   "rounded flex items-center justify-center transition-all border shadow-sm text-white font-black text-[10px]",
                                   (client.assignedWhatsappId && assignedAcc)
-                                    ? "text-white px-2.5 py-1 min-h-[24px] whitespace-nowrap" 
+                                    ? "text-white px-2 py-0.5 min-h-[22px] max-w-[115px] truncate font-sans text-[10px]" 
                                     : "bg-white border-[#dadce0] text-[#5f6368] hover:border-emerald-500 hover:text-emerald-500 w-6 h-6"
                                 )}
                                 style={(client.assignedWhatsappId && assignedAcc) ? (() => {
@@ -5522,14 +5589,16 @@ export default function App() {
                                 })() : {}}
                               >
                                 {(client.assignedWhatsappId && assignedAcc) ? (
-                                  (() => {
-                                    const matchingChip = findMatchingChip(assignedAcc, whatsappChips);
-                                    if (whatsappDisplayMode === 'telefone') {
-                                      return (matchingChip?.aparelho || assignedAcc.name);
-                                    } else {
-                                      return formatPerfilPc(matchingChip?.perfilPc || assignedAcc.identifier);
-                                    }
-                                  })()
+                                  <span className="truncate max-w-[105px] inline-block">
+                                    {(() => {
+                                      const matchingChip = findMatchingChip(assignedAcc, whatsappChips);
+                                      if (whatsappDisplayMode === 'telefone') {
+                                        return (matchingChip?.aparelho || assignedAcc.name);
+                                      } else {
+                                        return formatPerfilPc(matchingChip?.perfilPc || assignedAcc.identifier);
+                                      }
+                                    })()}
+                                  </span>
                                 ) : (
                                   <Phone size={11} />
                                 )}
