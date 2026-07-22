@@ -1782,19 +1782,19 @@ export default function App() {
       
       snapshot.docs.forEach(doc => {
         const data = doc.data();
+        const key = data.clientKey || doc.id;
         if (data.paymentStatus) {
-          pStatuses[data.clientKey] = {
+          pStatuses[key] = {
             status: data.paymentStatus,
             updatedAt: data.paymentStatusUpdatedAt
           };
         }
         if (data.potsCount) {
-          pCounts[data.clientKey] = data.potsCount;
+          pCounts[key] = data.potsCount;
         }
         
-        // Legacy tag support: if tag exists in clientData, we'll keep it in extraData
-        // and we might need to sync it to clientTags state elsewhere
-        extraData[data.clientKey] = data;
+        // Legacy tag & extra fields support
+        extraData[key] = data;
       });
       
       setPaymentStatuses(pStatuses);

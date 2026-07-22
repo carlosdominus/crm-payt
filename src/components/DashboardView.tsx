@@ -796,7 +796,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         if (!hasMatchingProduct) return;
       }
       const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
-      if (['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag)) {
+      if (tag !== 'lixo') {
         const stateName = getLocalFromPhone(client.telefone);
         if (stateName && stateName !== 'Não Especificado' && stateName !== 'Sem DDD') {
           const existing = stateMap.get(stateName) || { stateName, contactedLeads: 0, salesCount: 0, salesValue: 0 };
@@ -939,7 +939,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         if (!hasMatchingProduct) return;
       }
       const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
-      if (['reloginho', 'pendente', 'contato_sucesso', 'contato_falha', 'vendido'].includes(tag)) {
+      if (tag !== 'lixo') {
         const gender = predictGenderFromName(client.nome);
         if (gender === 'Feminino' || gender === 'Masculino') {
           const existing = genderMap.get(gender)!;
