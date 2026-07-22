@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { WhatsAppChip } from '../types';
-import { findClientForSale, cleanPhone } from '../App';
+import { findClientForSale, cleanPhone, findWhatsAppAccount } from '../App';
 
 const cn = (...classes: (string | boolean | undefined)[]) => classes.filter(Boolean).join(' ');
 
@@ -403,8 +403,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const getClientWhatsappId = (client: any): string => {
-    if (client?.assignedWhatsappId) return client.assignedWhatsappId;
     if (!client) return 'Não Atribuído';
+    if (client.assignedWhatsappId) {
+      const acc = findWhatsAppAccount(client.assignedWhatsappId, whatsappAccounts);
+      if (acc) return acc.id;
+      return client.assignedWhatsappId;
+    }
     
     const phone = client.telefone || '';
     if (!phone) return 'Não Atribuído';
@@ -437,9 +441,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const dashWhatsappDistribution = useMemo(() => {
     const distributionMap = new Map<string, number>();
     filteredClientsForDash.forEach(client => {
-      const tag = getClientTag(client);
+      const tag = getClientTag ? getClientTag(client) : (clientTags[client.key] || '');
       if (tag === 'lixo') return;
-      const key = getClientWhatsappId(client);
+      const rawKey = getClientWhatsappId(client);
+      const acc = findWhatsAppAccount(rawKey, whatsappAccounts);
+      const key = acc ? acc.id : rawKey;
       distributionMap.set(key, (distributionMap.get(key) || 0) + 1);
     });
     return Array.from(distributionMap.entries()).map(([key, value]) => {
@@ -450,15 +456,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           color: '#cbd5e1'
         };
       }
-      const account = whatsappAccounts.find(a => a.id === key);
-      const formattedName = account ? getFormattedAccountName(account) : 'Não Atribuído';
+      const account = findWhatsAppAccount(key, whatsappAccounts);
+      const formattedName = account ? getFormattedAccountName(account) : key;
       return { 
          name: formattedName, 
          value, 
          color: account ? account.color : '#cbd5e1' 
       };
     }).sort((a, b) => b.value - a.value);
-  }, [filteredClientsForDash, whatsappAccounts, whatsappChips, whatsappDisplayMode, getClientTag]);
+  }, [filteredClientsForDash, whatsappAccounts, whatsappChips, whatsappDisplayMode, getClientTag, clientTags]);
 
   const dashWhatsappSales = useMemo(() => {
     const salesValueMap = new Map<string, number>();
@@ -466,7 +472,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     
     filteredSalesForDash.forEach(sale => {
       const client = findClientForSale(sale, enrichedClients);
-      const key = getClientWhatsappId(client);
+      const rawKey = getClientWhatsappId(client);
+      const acc = findWhatsAppAccount(rawKey, whatsappAccounts);
+      const key = acc ? acc.id : rawKey;
       
       salesValueMap.set(key, (salesValueMap.get(key) || 0) + sale.value);
       salesCountMap.set(key, (salesCountMap.get(key) || 0) + 1);
@@ -483,6 +491,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         };
       })
       .filter(item => item.value > 0 || item.count > 0);
+
+    salesValueMap.forEach((val, key) => {
+      if (key !== 'Não Atribuído' && !whatsappAccounts.some(a => a.id === key)) {
+        const acc = findWhatsAppAccount(key, whatsappAccounts);
+        const name = acc ? getFormattedAccountName(acc) : key;
+        if (!salesData.some(d => d.name === name)) {
+          salesData.push({
+            name,
+            value: val,
+            count: salesCountMap.get(key) || 0,
+            color: acc?.color || '#3b82f6'
+          });
+        }
+      }
+    });
 
     if (salesValueMap.has('Não Atribuído') && (salesValueMap.get('Não Atribuído') || 0) > 0) {
       salesData.push({
@@ -789,7 +812,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         const cleaned = sName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
         if (cleaned.toLowerCase() !== conversionProductFilter.toLowerCase()) return;
       }
-      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      const client = findClientForSale(sale, enrichedClients);
       if (client) {
         const stateName = getLocalFromPhone(client.telefone);
         if (stateName && stateName !== 'Não Especificado' && stateName !== 'Sem DDD') {
@@ -931,7 +954,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         const cleaned = sName.replace(/( - [0-9]+ Potes?)/gi, '').trim();
         if (cleaned.toLowerCase() !== conversionProductFilter.toLowerCase()) return;
       }
-      const client = enrichedClients.find(c => c.key === sale.clientKey);
+      const client = findClientForSale(sale, enrichedClients);
       if (client) {
         const gender = predictGenderFromName(client.nome);
         if (gender === 'Feminino' || gender === 'Masculino') {

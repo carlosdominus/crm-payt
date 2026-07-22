@@ -3310,8 +3310,8 @@ export default function App() {
         totalSpent,
         status,
         manualSales: clientManualSales,
-        trackingCode: extra.trackingCode,
-        assignedWhatsappId: extra.assignedWhatsappId
+        trackingCode: extra.trackingCode !== undefined ? extra.trackingCode : (client.trackingCode || ''),
+        assignedWhatsappId: (extra.assignedWhatsappId !== undefined && extra.assignedWhatsappId !== '') ? extra.assignedWhatsappId : (client.assignedWhatsappId || '')
       };
     });
   }, [clients, manualSales, clientExtraData]);
