@@ -402,13 +402,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  const getClientWhatsappId = (client: any): string => {
+    if (client?.assignedWhatsappId) return client.assignedWhatsappId;
+    if (!client) return 'Não Atribuído';
+    
+    const phone = client.telefone || '';
+    if (!phone) return 'Não Atribuído';
+    
+    const cleanTel = cleanPhone(phone);
+    if (!cleanTel) return 'Não Atribuído';
+
+    // 1. Check matching chip by clean number
+    const matchingChip = whatsappChips.find(c => {
+      const cClean = cleanPhone(c.numero || c.normalizedNumero || '');
+      return cClean && cClean === cleanTel;
+    });
+
+    if (matchingChip) {
+      const acc = whatsappAccounts.find(a => a.id === `acc_${matchingChip.id}` || a.id === matchingChip.id);
+      if (acc) return acc.id;
+    }
+
+    // 2. Check matching account by phone number
+    const matchingAcc = whatsappAccounts.find(a => {
+      const aClean = cleanPhone(a.phoneNumber || '');
+      return aClean && aClean === cleanTel;
+    });
+
+    if (matchingAcc) return matchingAcc.id;
+
+    return 'Não Atribuído';
+  };
+
   const dashWhatsappDistribution = useMemo(() => {
     const distributionMap = new Map<string, number>();
     filteredClientsForDash.forEach(client => {
       const tag = getClientTag(client);
       if (tag === 'lixo') return;
-      const whatsappId = client.assignedWhatsappId;
-      const key = whatsappId || 'Não Atribuído';
+      const key = getClientWhatsappId(client);
       distributionMap.set(key, (distributionMap.get(key) || 0) + 1);
     });
     return Array.from(distributionMap.entries()).map(([key, value]) => {
@@ -435,8 +466,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     
     filteredSalesForDash.forEach(sale => {
       const client = findClientForSale(sale, enrichedClients);
-      const whatsappId = client?.assignedWhatsappId;
-      const key = whatsappId || 'Não Atribuído';
+      const key = getClientWhatsappId(client);
       
       salesValueMap.set(key, (salesValueMap.get(key) || 0) + sale.value);
       salesCountMap.set(key, (salesCountMap.get(key) || 0) + 1);
@@ -452,7 +482,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           color: acc.color
         };
       })
-      .filter(item => item.value > 0);
+      .filter(item => item.value > 0 || item.count > 0);
 
     if (salesValueMap.has('Não Atribuído') && (salesValueMap.get('Não Atribuído') || 0) > 0) {
       salesData.push({

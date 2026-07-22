@@ -1173,6 +1173,7 @@ export default function App() {
   const [isSyncingChips, setIsSyncingChips] = useState(false);
   const [activeWhatsappChip, setActiveWhatsappChip] = useState<WhatsAppChip | null>(null);
   const [clientExtraData, setClientExtraData] = useState<Record<string, { trackingCode?: string; assignedWhatsappId?: string; tag?: string; nome?: string; email?: string; telefone?: string }>>({});
+  const [openZapPopoverKey, setOpenZapPopoverKey] = useState<string | null>(null);
   const [showWhatsappManager, setShowWhatsappManager] = useState(false);
   const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
   const [whatsappForm, setWhatsappForm] = useState({
@@ -5565,11 +5566,14 @@ export default function App() {
                             </button>
                           </div>
                         </td>
-                        <td className="px-2 py-1 border-b border-r border-[#dadce0] overflow-hidden w-[130px] min-w-[130px] max-w-[130px] text-center">
+                        <td className="px-2 py-1 border-b border-r border-[#dadce0] overflow-visible relative w-[130px] min-w-[130px] max-w-[130px] text-center">
                           <div className="flex items-center justify-center w-full">
                             <div className="relative group/zap max-w-[120px]" onClick={(e) => e.stopPropagation()}>
                               <button 
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenZapPopoverKey(prev => prev === clientKey ? null : clientKey);
+                                }}
                                 className={cn(
                                   "rounded flex items-center justify-center transition-all border shadow-sm text-white font-black text-[10px]",
                                   (client.assignedWhatsappId && assignedAcc)
@@ -5605,7 +5609,8 @@ export default function App() {
                               </button>
                               
                               <div className={cn(
-                                "absolute left-1/2 -translate-x-1/2 w-[350px] bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible transition-all z-[300] rounded-xl overflow-hidden",
+                                "absolute left-1/2 -translate-x-1/2 w-[350px] bg-white border border-modern-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] transition-all z-[300] rounded-xl overflow-hidden text-left",
+                                openZapPopoverKey === clientKey ? "opacity-100 visible pointer-events-auto" : "opacity-0 invisible group-hover/zap:opacity-100 group-hover/zap:visible",
                                 idx < 10 ? "top-full mt-2" : "bottom-full mb-2"
                               )}>
                                 <div className="p-3 border-b border-modern-border bg-slate-50 flex items-center justify-between">
@@ -5618,6 +5623,7 @@ export default function App() {
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         updateClientExtra(clientKey, { assignedWhatsappId: "" });
+                                        setOpenZapPopoverKey(null);
                                       }}
                                       className="w-full text-left px-3 py-3 text-[10px] font-bold hover:bg-rose-50 flex items-center gap-2 border-b border-modern-border/30 text-rose-600 uppercase tracking-tighter transition-colors"
                                     >
@@ -5644,7 +5650,7 @@ export default function App() {
                                     });
 
                                     if (filtered.length === 0) {
-                                      filtered = activeWhatsappAccounts;
+                                      filtered = activeWhatsappAccounts.length > 0 ? activeWhatsappAccounts : whatsappAccounts;
                                     }
 
                                     return filtered.map(acc => {
@@ -5664,6 +5670,7 @@ export default function App() {
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             updateClientExtra(clientKey, { assignedWhatsappId: acc.id });
+                                            setOpenZapPopoverKey(null);
                                           }}
                                           className={cn(
                                             "w-full text-left px-4 py-3 border-b border-modern-border/30 transition-colors hover:bg-slate-50",

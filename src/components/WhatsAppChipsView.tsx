@@ -48,7 +48,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
   onGoToCrm,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'active' | 'analise' | 'inactive'>('all');
   const [showClientSelectorForChip, setShowClientSelectorForChip] = useState<WhatsAppChip | null>(null);
   const [clientSearchTerm, setClientSearchTerm] = useState('');
 
@@ -71,13 +71,16 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
         chip.aparelho.toLowerCase().includes(searchTerm.toLowerCase());
 
       // Filtro por status ZAP
-      // Inativo = "caiu" ou "não aplica"
-      const statusLower = (chip.statusZap || '').toLowerCase();
+      const statusLower = (chip.statusZap || '').toLowerCase().trim();
       const isActive = statusLower === 'ativo';
-      const isInactive = statusLower === 'caiu' || statusLower === 'nao aplica' || statusLower === 'não aplica';
+      const isAnalise = statusLower.includes('analise') || statusLower.includes('análise');
+      const isInactive = statusLower === 'caiu' || statusLower === 'nao aplica' || statusLower === 'não aplica' || statusLower === 'inativo';
 
       if (filterType === 'active') {
         return matchSearch && isActive;
+      }
+      if (filterType === 'analise') {
+        return matchSearch && isAnalise;
       }
       if (filterType === 'inactive') {
         return matchSearch && isInactive;
@@ -89,15 +92,22 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
   // Estatísticas para cards informativos
   const stats = useMemo(() => {
     let active = 0;
+    let analise = 0;
     let inactive = 0;
     chips.forEach(chip => {
-      const statusLower = (chip.statusZap || '').toLowerCase();
-      if (statusLower === 'ativo') active++;
-      else if (statusLower === 'caiu' || statusLower === 'nao aplica' || statusLower === 'não aplica') inactive++;
+      const statusLower = (chip.statusZap || '').toLowerCase().trim();
+      if (statusLower === 'ativo') {
+        active++;
+      } else if (statusLower.includes('analise') || statusLower.includes('análise')) {
+        analise++;
+      } else if (statusLower === 'caiu' || statusLower === 'nao aplica' || statusLower === 'não aplica' || statusLower === 'inativo') {
+        inactive++;
+      }
     });
     return {
       total: chips.length,
       active,
+      analise,
       inactive
     };
   }, [chips]);
@@ -128,8 +138,8 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
       {/* Top Banner and Stats Row (Unified for maximum compactness) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         
-        {/* Left Side: Aparelhos WhatsApp Title & Sync - Spans 6 cols */}
-        <div className="lg:col-span-6 bg-white p-4.5 rounded-2xl border border-modern-border shadow-sm flex flex-col justify-between gap-3">
+        {/* Left Side: Aparelhos WhatsApp Title & Sync - Spans 4 cols */}
+        <div className="lg:col-span-4 bg-white p-4.5 rounded-2xl border border-modern-border shadow-sm flex flex-col justify-between gap-3">
           <div className="space-y-1">
             <h2 className="text-base font-bold tracking-tight text-modern-text flex items-center gap-2">
               <Smartphone className="text-modern-primary" size={18} />
@@ -180,6 +190,15 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
           </div>
         </div>
 
+        {/* Chips Em Análise Card - Spans 2 cols */}
+        <div className="lg:col-span-2 bg-white border border-amber-200/80 bg-amber-50/30 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-amber-600 leading-none">Em Análise</p>
+          <div className="flex items-baseline gap-1.5 mt-2">
+            <p className="text-xl font-black text-amber-600 leading-none">{stats.analise}</p>
+            <p className="text-[9px] text-amber-700/70 font-medium">aguardando liberação</p>
+          </div>
+        </div>
+
         {/* Chips Inativos Card - Spans 2 cols */}
         <div className="lg:col-span-2 bg-white border border-modern-border rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <p className="text-[9px] font-bold uppercase tracking-wider text-rose-500 leading-none">Chips Inativos</p>
@@ -198,6 +217,7 @@ export const WhatsAppChipsView: React.FC<WhatsAppChipsViewProps> = ({
           {[
             { id: 'all', label: 'Todos' },
             { id: 'active', label: 'Ativos' },
+            { id: 'analise', label: 'Em Análise' },
             { id: 'inactive', label: 'Inativos' }
           ].map((item) => (
             <button
