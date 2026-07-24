@@ -3005,68 +3005,85 @@ export default function App() {
       let csvText = '';
       let success = false;
 
-      for (const baseUrl of candidatesToTry) {
-        if (success) break;
-
-        // 1. Direct fetch
-        try {
-          const directRes = await fetch(baseUrl);
-          if (directRes.ok) {
-            const text = await directRes.text();
-            if (isValidCsvContent(text)) {
-              csvText = text;
-              success = true;
-              break;
-            }
+      // 0. Try local server proxy endpoint (bypasses browser CORS completely via Node backend)
+      try {
+        const localProxyUrl = `/api/proxy-sheet?url=${encodeURIComponent(rawTargetUrl)}&_t=${Date.now()}`;
+        const localRes = await fetch(localProxyUrl);
+        if (localRes.ok) {
+          const text = await localRes.text();
+          if (isValidCsvContent(text)) {
+            csvText = text;
+            success = true;
           }
-        } catch (directErr) {
-          console.warn("Direct fetch candidate failed:", baseUrl, directErr);
         }
+      } catch (localErr) {
+        console.warn("Local proxy endpoint not available or failed, falling back to direct/CORS proxies...", localErr);
+      }
 
-        if (success) break;
+      if (!success) {
+        for (const baseUrl of candidatesToTry) {
+          if (success) break;
 
-        // 2. CORS proxies
-        const encUrl = encodeURIComponent(baseUrl);
-        const proxyUrls = [
-          `https://api.allorigins.win/raw?url=${encUrl}`,
-          `https://corsproxy.io/?${encUrl}`,
-          `https://api.codetabs.com/v1/proxy?quest=${encUrl}`,
-          `https://thingproxy.freeboard.io/fetch/${baseUrl}`
-        ];
-
-        for (const proxyUrl of proxyUrls) {
+          // 1. Direct fetch
           try {
-            console.log(`Trying proxy: ${proxyUrl}`);
-            const proxyRes = await fetch(proxyUrl);
-            if (proxyRes.ok) {
-              const text = await proxyRes.text();
+            const directRes = await fetch(baseUrl);
+            if (directRes.ok) {
+              const text = await directRes.text();
               if (isValidCsvContent(text)) {
                 csvText = text;
                 success = true;
                 break;
               }
             }
-          } catch (proxyErr) {
-            console.warn(`Proxy failed: ${proxyUrl}`, proxyErr);
+          } catch (directErr) {
+            console.warn("Direct fetch candidate failed:", baseUrl, directErr);
           }
-        }
 
-        if (success) break;
+          if (success) break;
 
-        // 3. JSON wrapper proxy (AllOrigins)
-        try {
-          const jsonProxy = `https://api.allorigins.win/get?url=${encUrl}&_t=${Date.now()}`;
-          const jsonRes = await fetch(jsonProxy);
-          if (jsonRes.ok) {
-            const jsonData = await jsonRes.json();
-            if (jsonData && jsonData.contents && isValidCsvContent(jsonData.contents)) {
-              csvText = jsonData.contents;
-              success = true;
-              break;
+          // 2. CORS proxies
+          const encUrl = encodeURIComponent(baseUrl);
+          const proxyUrls = [
+            `https://api.allorigins.win/raw?url=${encUrl}`,
+            `https://corsproxy.io/?${encUrl}`,
+            `https://api.codetabs.com/v1/proxy?quest=${encUrl}`,
+            `https://thingproxy.freeboard.io/fetch/${baseUrl}`
+          ];
+
+          for (const proxyUrl of proxyUrls) {
+            try {
+              console.log(`Trying proxy: ${proxyUrl}`);
+              const proxyRes = await fetch(proxyUrl);
+              if (proxyRes.ok) {
+                const text = await proxyRes.text();
+                if (isValidCsvContent(text)) {
+                  csvText = text;
+                  success = true;
+                  break;
+                }
+              }
+            } catch (proxyErr) {
+              console.warn(`Proxy failed: ${proxyUrl}`, proxyErr);
             }
           }
-        } catch (jsonErr) {
-          console.warn("JSON proxy failed:", jsonErr);
+
+          if (success) break;
+
+          // 3. JSON wrapper proxy (AllOrigins)
+          try {
+            const jsonProxy = `https://api.allorigins.win/get?url=${encUrl}&_t=${Date.now()}`;
+            const jsonRes = await fetch(jsonProxy);
+            if (jsonRes.ok) {
+              const jsonData = await jsonRes.json();
+              if (jsonData && jsonData.contents && isValidCsvContent(jsonData.contents)) {
+                csvText = jsonData.contents;
+                success = true;
+                break;
+              }
+            }
+          } catch (jsonErr) {
+            console.warn("JSON proxy failed:", jsonErr);
+          }
         }
       }
 
