@@ -2971,42 +2971,76 @@ export default function App() {
     setRefreshing(true);
     setFetchError(null);
     try {
-      const targetUrl = sheetCsvUrl || SHEET_CSV_URL;
-      const cacheBuster = `_t=${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const urlWithCacheBust = targetUrl.includes('?') ? `${targetUrl}&${cacheBuster}` : `${targetUrl}?${cacheBuster}`;
+      const rawTargetUrl = (sheetCsvUrl || SHEET_CSV_URL).trim();
+
+      // Helper validator to ensure the fetched content is valid CSV (not HTML login or error pages)
+      const isValidCsvContent = (text: string) => {
+        if (!text || text.length < 15) return false;
+        const trimmed = text.trim().toLowerCase();
+        if (
+          trimmed.startsWith('<!doctype html') ||
+          trimmed.startsWith('<html') ||
+          trimmed.startsWith('<head') ||
+          trimmed.startsWith('{"error"') ||
+          trimmed.startsWith('{"status"')
+        ) {
+          return false;
+        }
+        return true;
+      };
+
+      // Extract Google Sheet ID if present to build candidates (gviz/tq is extremely CORS-friendly)
+      const sheetIdMatch = rawTargetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+
+      const candidatesToTry: string[] = [];
+      if (sheetId) {
+        candidatesToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`);
+        candidatesToTry.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`);
+      }
+      if (!candidatesToTry.includes(rawTargetUrl)) {
+        candidatesToTry.push(rawTargetUrl);
+      }
 
       let csvText = '';
       let success = false;
 
-      // 1. Direct fetch (Google Sheets export link allows direct browser GET without custom headers)
-      try {
-        const directRes = await fetch(urlWithCacheBust);
-        if (directRes.ok) {
-          const text = await directRes.text();
-          if (text && text.length > 20) {
-            csvText = text;
-            success = true;
-          }
-        }
-      } catch (directErr) {
-        console.warn("Direct fetch failed or blocked by CORS. Trying public CORS proxies...", directErr);
-      }
+      for (const baseUrl of candidatesToTry) {
+        if (success) break;
 
-      // 2. Try raw CORS proxies without custom headers (custom headers trigger failing OPTIONS preflights)
-      if (!success) {
-        const rawProxies = [
-          `https://corsproxy.io/?${encodeURIComponent(urlWithCacheBust)}`,
-          `https://api.allorigins.win/raw?url=${encodeURIComponent(urlWithCacheBust)}`,
-          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(urlWithCacheBust)}`
+        // 1. Direct fetch
+        try {
+          const directRes = await fetch(baseUrl);
+          if (directRes.ok) {
+            const text = await directRes.text();
+            if (isValidCsvContent(text)) {
+              csvText = text;
+              success = true;
+              break;
+            }
+          }
+        } catch (directErr) {
+          console.warn("Direct fetch candidate failed:", baseUrl, directErr);
+        }
+
+        if (success) break;
+
+        // 2. CORS proxies
+        const encUrl = encodeURIComponent(baseUrl);
+        const proxyUrls = [
+          `https://api.allorigins.win/raw?url=${encUrl}`,
+          `https://corsproxy.io/?${encUrl}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encUrl}`,
+          `https://thingproxy.freeboard.io/fetch/${baseUrl}`
         ];
 
-        for (const proxyUrl of rawProxies) {
+        for (const proxyUrl of proxyUrls) {
           try {
             console.log(`Trying proxy: ${proxyUrl}`);
             const proxyRes = await fetch(proxyUrl);
             if (proxyRes.ok) {
               const text = await proxyRes.text();
-              if (text && text.length > 20) {
+              if (isValidCsvContent(text)) {
                 csvText = text;
                 success = true;
                 break;
@@ -3016,18 +3050,19 @@ export default function App() {
             console.warn(`Proxy failed: ${proxyUrl}`, proxyErr);
           }
         }
-      }
 
-      // 3. Fallback: JSON wrapper proxy (AllOrigins JSON endpoint)
-      if (!success) {
+        if (success) break;
+
+        // 3. JSON wrapper proxy (AllOrigins)
         try {
-          const jsonProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(urlWithCacheBust)}`;
-          const jsonRes = await fetch(jsonProxyUrl);
+          const jsonProxy = `https://api.allorigins.win/get?url=${encUrl}&_t=${Date.now()}`;
+          const jsonRes = await fetch(jsonProxy);
           if (jsonRes.ok) {
             const jsonData = await jsonRes.json();
-            if (jsonData && jsonData.contents && jsonData.contents.length > 20) {
+            if (jsonData && jsonData.contents && isValidCsvContent(jsonData.contents)) {
               csvText = jsonData.contents;
               success = true;
+              break;
             }
           }
         } catch (jsonErr) {
@@ -5640,7 +5675,7 @@ export default function App() {
                         onClick={() => setSelectedClient(client)}
                         className={cn(
                           "group transition-colors cursor-pointer relative hover:z-[200]",
-                          isCustomer ? "bg-emerald-50/50 hover:bg-emerald-100/60" : "bg-white hover:bg-[#f1f3f4]"
+                          isCustomer ? "bg-emerald-100/80 hover:bg-emerald-200/70" : "bg-white hover:bg-[#f1f3f4]"
                         )}
                         initial={false}
                         animate={{ opacity: 1 }}
