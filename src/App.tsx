@@ -824,25 +824,46 @@ const parseDateTime = (dateStr: string, timeStr: string): Date | null => {
   return null;
 };
 
-const isObsoleteLead = (lead: Lead, allLeads: Lead[]): boolean => {
+const isObsoleteLead = (lead: Lead, allLeads: Lead[], manualSales?: ManualSale[]): boolean => {
   if (lead.status === 'Aprovado' || lead.status === 'Reembolsado') {
     return false;
   }
   
   const normLeadProd = normalizeProductName(lead.produto || "");
   
-  // An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product or customer
-  const hasApprovedSameProduct = allLeads.some(l => {
+  // 1. Check if there is an approved manual sale for this client
+  if (manualSales && manualSales.length > 0) {
+    const hasManualSale = manualSales.some(ms => {
+      let ts = ms.timestamp || 0;
+      if (!ts && ms.date) {
+        try {
+          const parsed = parse(ms.date, 'yyyy-MM-dd', new Date());
+          if (!isNaN(parsed.getTime())) ts = parsed.getTime();
+        } catch (e) {}
+      }
+      const normMsProd = normalizeProductName(ms.productName || "");
+      const sameProduct = !normLeadProd || !normMsProd || normLeadProd === normMsProd || 
+                          (normLeadProd && normMsProd && (normLeadProd.includes(normMsProd) || normMsProd.includes(normLeadProd)));
+      const isSameOrAfterTime = ts >= (lead.timestamp - 300000);
+      return sameProduct || isSameOrAfterTime;
+    });
+    if (hasManualSale) return true;
+  }
+
+  // 2. An unpaid lead is obsolete if there is an 'Aprovado' lead for the same product or created at the same time / after this unpaid lead
+  const hasApprovedLead = allLeads.some(l => {
     if (l.status !== 'Aprovado') return false;
     
     const normLProd = normalizeProductName(l.produto || "");
     const sameProduct = !normLeadProd || !normLProd || normLeadProd === normLProd || 
                         (normLeadProd && normLProd && (normLeadProd.includes(normLProd) || normLProd.includes(normLeadProd)));
                         
-    return sameProduct;
+    const isSameOrAfterTime = l.timestamp >= (lead.timestamp - 300000);
+
+    return sameProduct || isSameOrAfterTime;
   });
   
-  return hasApprovedSameProduct;
+  return hasApprovedLead;
 };
 
 const dddToState: Record<string, string> = {
@@ -1002,18 +1023,18 @@ const predictGenderFromName = (fullName: string | undefined | null): 'Masculino'
   return 'Indefinido';
 };
 
-const determineActiveStatus = (leads: Lead[]): string => {
-  if (!leads || leads.length === 0) return 'Sem status';
+const determineActiveStatus = (leads: Lead[], manualSales?: ManualSale[]): string => {
+  if ((!leads || leads.length === 0) && (!manualSales || manualSales.length === 0)) return 'Sem status';
   
-  // If ANY lead for this client is 'Aprovado', active status MUST be 'Aprovado'
-  if (leads.some(l => l.status === 'Aprovado')) {
-    return 'Aprovado';
+  // Filter out obsolete leads (e.g. unpaid leads that were superseded by an approved sale for the same checkout/product)
+  const activeLeads = leads ? leads.filter(lead => !isObsoleteLead(lead, leads, manualSales)) : [];
+  const targetLeads = activeLeads.length > 0 ? activeLeads : (leads || []);
+  
+  if (targetLeads.length === 0) {
+    if (manualSales && manualSales.length > 0) return 'Aprovado';
+    return 'Sem status';
   }
-  
-  // Filter out obsolete leads before determining status!
-  const activeLeads = leads.filter(lead => !isObsoleteLead(lead, leads));
-  const targetLeads = activeLeads.length > 0 ? activeLeads : leads;
-  
+
   const sorted = [...targetLeads].sort((a, b) => {
     if (b.timestamp !== a.timestamp) {
       return b.timestamp - a.timestamp;
@@ -1022,6 +1043,21 @@ const determineActiveStatus = (leads: Lead[]): string => {
   });
   
   const mostRecent = sorted[0];
+
+  // If there's a manual sale that occurred at or after the most recent lead, active status is Aprovado
+  if (manualSales && manualSales.length > 0) {
+    const hasRecentManualSale = manualSales.some(ms => {
+      let msTs = ms.timestamp || 0;
+      if (!msTs && ms.date) {
+        try {
+          const parsed = parse(ms.date, 'yyyy-MM-dd', new Date());
+          if (!isNaN(parsed.getTime())) msTs = parsed.getTime();
+        } catch (e) {}
+      }
+      return msTs >= (mostRecent.timestamp - 300000);
+    });
+    if (hasRecentManualSale) return 'Aprovado';
+  }
   
   if (sorted.length === 1) return mostRecent.status;
   
@@ -1038,7 +1074,7 @@ const determineActiveStatus = (leads: Lead[]): string => {
     return isSameProduct && isCloseInTime;
   });
   
-  // Status priority (higher priority wins within the same checkout session)
+  // Status priority (higher priority wins within the SAME checkout session)
   const statusPriority: Record<string, number> = {
     'Aprovado': 100,
     'Reembolsado': 90,
@@ -1073,6 +1109,7 @@ export default function App() {
   const seenLeadIdsRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 
@@ -2934,41 +2971,73 @@ export default function App() {
     setRefreshing(true);
     setFetchError(null);
     try {
-      let response;
       const targetUrl = sheetCsvUrl || SHEET_CSV_URL;
-      try {
-        response = await fetch(targetUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch sheet directly. Status: ${response.status}`);
-        }
-      } catch (directErr) {
-        console.warn("Direct fetch failed or blocked by CORS. Trying via public CORS proxies...", directErr);
-        
-        const proxies = [
-          `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-          `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`
-        ];
+      const cacheBuster = `_t=${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const urlWithCacheBust = targetUrl.includes('?') ? `${targetUrl}&${cacheBuster}` : `${targetUrl}?${cacheBuster}`;
 
-        let success = false;
-        for (const proxy of proxies) {
-          try {
-            console.log(`Trying proxy: ${proxy}`);
-            response = await fetch(proxy);
-            if (response.ok) {
-              success = true;
-              break;
-            }
-          } catch (proxyErr) {
-            console.warn(`Proxy failed: ${proxy}`, proxyErr);
+      let csvText = '';
+      let success = false;
+
+      // 1. Direct fetch (Google Sheets export link allows direct browser GET without custom headers)
+      try {
+        const directRes = await fetch(urlWithCacheBust);
+        if (directRes.ok) {
+          const text = await directRes.text();
+          if (text && text.length > 20) {
+            csvText = text;
+            success = true;
           }
         }
+      } catch (directErr) {
+        console.warn("Direct fetch failed or blocked by CORS. Trying public CORS proxies...", directErr);
+      }
 
-        if (!success) {
-          throw new Error("Não foi possível conectar a nenhum servidor de proxy CORS para buscar os dados da planilha de clientes.");
+      // 2. Try raw CORS proxies without custom headers (custom headers trigger failing OPTIONS preflights)
+      if (!success) {
+        const rawProxies = [
+          `https://corsproxy.io/?${encodeURIComponent(urlWithCacheBust)}`,
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(urlWithCacheBust)}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(urlWithCacheBust)}`
+        ];
+
+        for (const proxyUrl of rawProxies) {
+          try {
+            console.log(`Trying proxy: ${proxyUrl}`);
+            const proxyRes = await fetch(proxyUrl);
+            if (proxyRes.ok) {
+              const text = await proxyRes.text();
+              if (text && text.length > 20) {
+                csvText = text;
+                success = true;
+                break;
+              }
+            }
+          } catch (proxyErr) {
+            console.warn(`Proxy failed: ${proxyUrl}`, proxyErr);
+          }
         }
       }
-      const csvText = await response.text();
+
+      // 3. Fallback: JSON wrapper proxy (AllOrigins JSON endpoint)
+      if (!success) {
+        try {
+          const jsonProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(urlWithCacheBust)}`;
+          const jsonRes = await fetch(jsonProxyUrl);
+          if (jsonRes.ok) {
+            const jsonData = await jsonRes.json();
+            if (jsonData && jsonData.contents && jsonData.contents.length > 20) {
+              csvText = jsonData.contents;
+              success = true;
+            }
+          }
+        } catch (jsonErr) {
+          console.warn("JSON proxy failed:", jsonErr);
+        }
+      }
+
+      if (!success || !csvText) {
+        throw new Error("Não foi possível conectar a nenhum servidor de proxy para buscar os dados da planilha de clientes. Verifique sua conexão ou a URL da planilha.");
+      }
       
       Papa.parse(csvText, {
         header: true,
@@ -3161,18 +3230,12 @@ export default function App() {
             const phoneKey = lead.telefone?.trim();
             
             let existing: Client | undefined;
+            const isValPhone = phoneKey && isValidPhone(phoneKey);
+
             if (emailKey && emailMap.has(emailKey)) {
               existing = emailMap.get(emailKey);
-            } else if (phoneKey && phoneMap.has(phoneKey)) {
-              const possibleExisting = phoneMap.get(phoneKey)!;
-              const existingEmail = possibleExisting.email?.toLowerCase().trim();
-              // Agrupa pelo telefone se:
-              // 1. O lead atual não tiver e-mail
-              // 2. O cliente já existente não tiver e-mail
-              // 3. Ou se ambos tiverem o mesmo e-mail
-              if (!emailKey || !existingEmail || emailKey === existingEmail) {
-                existing = possibleExisting;
-              }
+            } else if (isValPhone && phoneMap.has(phoneKey)) {
+              existing = phoneMap.get(phoneKey);
             }
 
             if (existing) {
@@ -3247,11 +3310,7 @@ export default function App() {
             if (emailKey && emailLookup.has(emailKey)) {
               existing = emailLookup.get(emailKey);
             } else if (isValPhone && phoneLookup.has(phoneKey)) {
-              const candidate = phoneLookup.get(phoneKey)!;
-              const candidateEmail = candidate.email?.toLowerCase().trim();
-              if (!emailKey || !candidateEmail || emailKey === candidateEmail) {
-                existing = candidate;
-              }
+              existing = phoneLookup.get(phoneKey);
             }
 
             if (existing) {
@@ -3333,6 +3392,7 @@ export default function App() {
           }).sort((a, b) => b.lastPurchaseTimestamp - a.lastPurchaseTimestamp);
 
           setClients(sortedClients);
+          setLastSyncedTime(new Date().toLocaleTimeString('pt-BR'));
           setLoading(false);
           setRefreshing(false);
         },
@@ -3353,10 +3413,10 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-    // Background auto-refresh interval: fetch silently every 60 seconds to avoid Google Sheets API rate-limiting
+    // Background auto-refresh interval: fetch silently every 20 seconds for seamless multi-device synchronization
     const intervalId = setInterval(() => {
       fetchData();
-    }, 60000);
+    }, 20000);
     return () => clearInterval(intervalId);
   }, [sheetCsvUrl]);
 
@@ -4502,13 +4562,21 @@ export default function App() {
               >
                 <Phone size={18} />
               </button>
-              <button 
-                onClick={fetchData}
-                disabled={refreshing}
-                className="w-10 h-10 bg-white border border-modern-border rounded-lg flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm"
-              >
-                <RefreshCw size={18} strokeWidth={2.5} className={cn(refreshing && "animate-spin")} />
-              </button>
+              <div className="flex items-center gap-2">
+                {lastSyncedTime && (
+                  <span className="text-[10px] text-slate-500 font-medium hidden md:inline-block bg-slate-100 px-2 py-1 rounded-md border border-slate-200/80">
+                    Sincronizado {lastSyncedTime}
+                  </span>
+                )}
+                <button 
+                  onClick={fetchData}
+                  disabled={refreshing}
+                  className="w-10 h-10 bg-white border border-modern-border rounded-lg flex items-center justify-center text-modern-secondary hover:text-modern-primary transition-all disabled:opacity-30 shadow-sm cursor-pointer"
+                  title={lastSyncedTime ? `Sincronizar Agora (Última atualização: ${lastSyncedTime})` : "Sincronizar Agora"}
+                >
+                  <RefreshCw size={18} strokeWidth={2.5} className={cn(refreshing && "animate-spin")} />
+                </button>
+              </div>
             </div>
           </div>
         </header>
@@ -5561,11 +5629,19 @@ export default function App() {
                     const lastLead = getClientDisplayLead(client); // Match the active filters
                     const assignedAcc = findWhatsAppAccount(client.assignedWhatsappId, whatsappAccounts);
 
+                    // Check if client is already a customer (has at least one 'Aprovado' purchase/lead or manual sale)
+                    const isCustomer = (client.leads && client.leads.some(l => l.status === 'Aprovado')) || 
+                                       (client.manualSales && client.manualSales.length > 0) || 
+                                       client.status === 'Aprovado';
+
                     return (
                       <motion.tr 
                         key={`${clientKey}_${idx}`}
                         onClick={() => setSelectedClient(client)}
-                        className="group transition-colors cursor-pointer hover:bg-[#f1f3f4] relative hover:z-[200]"
+                        className={cn(
+                          "group transition-colors cursor-pointer relative hover:z-[200]",
+                          isCustomer ? "bg-emerald-50/50 hover:bg-emerald-100/60" : "bg-white hover:bg-[#f1f3f4]"
+                        )}
                         initial={false}
                         animate={{ opacity: 1 }}
                       >
@@ -5942,13 +6018,19 @@ export default function App() {
                         </td>
                         <td className="px-3 py-1 border-b border-r border-[#dadce0]">
                           <div className="flex items-center gap-2">
-                            <div className={cn(
-                              "px-1.5 py-0.5 rounded-md text-[9px] font-medium uppercase tracking-wider",
-                              STATUS_THEMES[lastLead?.status || client.status]?.bg || "bg-slate-100",
-                              STATUS_THEMES[lastLead?.status || client.status]?.text || "text-slate-500"
-                            )}>
-                              {lastLead?.status || client.status}
-                            </div>
+                            {(() => {
+                              const hasActiveStatusFilter = statusFilter.length > 0 && !statusFilter.includes('all');
+                              const displayStatus = (hasActiveStatusFilter && lastLead?.status) ? lastLead.status : client.status;
+                              return (
+                                <div className={cn(
+                                  "px-1.5 py-0.5 rounded-md text-[9px] font-medium uppercase tracking-wider",
+                                  STATUS_THEMES[displayStatus]?.bg || "bg-slate-100",
+                                  STATUS_THEMES[displayStatus]?.text || "text-slate-500"
+                                )}>
+                                  {displayStatus}
+                                </div>
+                              );
+                            })()}
                             <div className={cn(
                               "px-2 py-0.5 rounded-md text-[8px] font-black uppercase shadow-sm flex items-center justify-center",
                               !currentTag ? "bg-[#DBEAFE] text-blue-700" :
